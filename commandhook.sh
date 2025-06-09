@@ -51,6 +51,10 @@ _git_commit_if_dirty() {
 # Before each user command
 autogit_pre() {
 
+  # skips autocompletion commands, traps, and VSCode commands
+  [[ -n ${COMP_LINE-} ]] && return 0
+  [[ -n ${COMP_POINT-} ]] && return 0
+  
   case "$BASH_COMMAND" in
     autogit_post*   |   \
     trap\ -*       |   \
