@@ -1,6 +1,7 @@
 #!/bin/bash
 
 #------hook to automatically commit changes in git repositories------------
+shopt -s extdebug
 
 GITCHECK_DIRS="$HOME/.autogitcheck"
 # commit if dirty, using the supplied commit-msg
@@ -50,16 +51,36 @@ _git_commit_if_dirty() {
 # Before each user command
 autogit_pre() {
 
-  [[ "$BASH_COMMAND" == "autogit_post" ]] && return
+  case "$BASH_COMMAND" in
+    autogit_post*   |   \
+    trap\ -*       |   \
+    __vsc_*        )
+      return 0
+      ;;
+  esac
   # turn off the DEBUG trap so nothing inside re-triggers us
   trap - DEBUG
 
   # capture what command is about to run
   PREV_CMD="$BASH_COMMAND"
 
+  local cmd_and_args=()
+  # split the command into an array to handle cases with spaces
+  read -r -a cmd_and_args <<< "$PREV_CMD"
+
+  local type
+  type=$(type -t -- "${cmd_and_args[0]}")
   # do our check
   _git_commit_if_dirty "Pre-command Commit: $PREV_CMD"
 
+  if [[ $type == file || $type == alias ]]; then
+    echo "Running command under strace: $PREV_CMD"
+    strace -f -e trace=execve -- "${cmd_and_args[@]}" 
+    # re-install the DEBUG hook for next time
+    trap 'autogit_pre' DEBUG
+    # terminate the original command early so it doesn't execute the same effects twice
+    return 1
+  fi
   # re-install the DEBUG hook for next time
   trap 'autogit_pre' DEBUG
 }
@@ -67,11 +88,11 @@ autogit_pre() {
 # After each user command
 autogit_post() {
   # again, disable DEBUG so we don't recurse when we cd/git inside here
-  #trap - DEBUG
+  trap - DEBUG
 
   # use the same $PREV_CMD we saved in the DEBUG hook
   _git_commit_if_dirty "Post-command Commit: $PREV_CMD"
-
+  trap 'autogit_pre' DEBUG
 }
 
 
