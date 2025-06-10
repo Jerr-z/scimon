@@ -79,7 +79,7 @@ autogit_pre() {
 
   if [[ $type == file || $type == alias ]]; then
     echo "Running command under strace: $PREV_CMD"
-    strace -f -e trace=execve -- "${cmd_and_args[@]}" 
+    strace -f -e trace=openat,openat2,open,creat,access,faccessat,faccessat2,statx,stat,lstat,fstat,readlink,readlinkat,rename,renameat,renameat2,link,linkat,symlink,symlinkat,mkdir,mkdirat,execve,execveat,fork,vfork,clone,clone3,connect,accept,accept4,fchownat,fchmodat -- "${cmd_and_args[@]}" 
     # re-install the DEBUG hook for next time
     trap 'autogit_pre' DEBUG
     # terminate the original command early so it doesn't execute the same effects twice
