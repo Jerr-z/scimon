@@ -41,6 +41,7 @@ _git_commit_if_dirty() {
 
         for file in $dirty_files; do
           # update the sqlite database with the post-command commit
+          # TODO: fix how this is being called, define a local list to save all the row ids of the dirty files, then loop through them and update the hash
           update_post_command_commit_hash "$file" "$(git rev-parse HEAD)"
         done
       fi
@@ -80,7 +81,7 @@ pre_command_git_check() {
 
   if [[ $type == file || $type == alias ]]; then
     echo "Running command under strace: $PREV_CMD"
-    # TODO: pipe the output to a function that parses the strace output
+    # TODO: pipe the output to a function that parses the strace output, then call correponding database operations
     strace -f -e trace=openat,openat2,open,creat,access,faccessat,faccessat2,statx,stat,lstat,fstat,readlink,readlinkat,rename,renameat,renameat2,link,linkat,symlink,symlinkat,mkdir,mkdirat,execve,execveat,fork,vfork,clone,clone3,connect,accept,accept4,fchownat,fchmodat -o strace.log -- "${cmd_and_args[@]}" 
     # re-install the DEBUG hook for next time
     trap 'pre_command_git_check' DEBUG
@@ -166,15 +167,16 @@ insert_command() {
   sqlite3 -batch .db \
     "INSERT INTO commands (filename, pre_command_commit, post_command_commit, command) \
      VALUES ('$filename', '$pre_commit', '$post_commit', '$command');"
+  LAST_INSERTED_COMMAND_ID=$(sqlite3 -batch .db "SELECT last_insert_rowid();")
 }
 
 update_post_command_commit_hash() {
-    local filename="$1"
+    local id="$1"
     local commit_hash="$2"
     # don't think this query is quite correct
     sqlite3 -batch .db "UPDATE autogitcheck 
                  SET post_command_commit = '$commit_hash' 
-                 WHERE filename = '$filename';"
+                 WHERE id = '$id';"
 }
 
 insert_process() {
