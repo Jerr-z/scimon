@@ -33,7 +33,7 @@ _git_commit_if_dirty() {
         # loop through all the files that are dirty
         for file in $dirty_files; do
           # insert the file into the sqlite database
-          insert_item "$file" "$(git rev-parse HEAD)" "" "$msg"
+          insert_command "$file" "$(git rev-parse HEAD)" "" "$msg"
         done
 
         git add -A || echo "git add failed in $dir"
@@ -49,14 +49,14 @@ _git_commit_if_dirty() {
 }
 
 # Before each user command
-autogit_pre() {
+pre_command_git_check() {
 
   # skips autocompletion commands, traps, and VSCode commands
   [[ -n ${COMP_LINE-} ]] && return 0
   [[ -n ${COMP_POINT-} ]] && return 0
   
   case "$BASH_COMMAND" in
-    autogit_post*   |   \
+    post_command_git_check*   |   \
     trap\ -*       |   \
     __vsc_*        )
       return 0
@@ -79,52 +79,84 @@ autogit_pre() {
 
   if [[ $type == file || $type == alias ]]; then
     echo "Running command under strace: $PREV_CMD"
+    # TODO: pipe the output to a function that parses the strace output
     strace -f -e trace=openat,openat2,open,creat,access,faccessat,faccessat2,statx,stat,lstat,fstat,readlink,readlinkat,rename,renameat,renameat2,link,linkat,symlink,symlinkat,mkdir,mkdirat,execve,execveat,fork,vfork,clone,clone3,connect,accept,accept4,fchownat,fchmodat -o strace.log -- "${cmd_and_args[@]}" 
     # re-install the DEBUG hook for next time
-    trap 'autogit_pre' DEBUG
+    trap 'pre_command_git_check' DEBUG
     # terminate the original command early so it doesn't execute the same effects twice
     return 1
   fi
   # re-install the DEBUG hook for next time
-  trap 'autogit_pre' DEBUG
+  trap 'pre_command_git_check' DEBUG
 }
 
 # After each user command
-autogit_post() {
+post_command_git_check() {
   # again, disable DEBUG so we don't recurse when we cd/git inside here
   trap - DEBUG
 
   # use the same $PREV_CMD we saved in the DEBUG hook
   _git_commit_if_dirty "Post-command Commit: $PREV_CMD"
-  trap 'autogit_pre' DEBUG
+  trap 'pre_command_git_check' DEBUG
 }
 
 
-trap 'PREV_CMD=$BASH_COMMAND; autogit_pre' DEBUG
-PROMPT_COMMAND='autogit_post'
+trap 'PREV_CMD=$BASH_COMMAND; pre_command_git_check' DEBUG
+PROMPT_COMMAND='post_command_git_check'
 
-#-------- creates sqlite table if it doesn't exist --------
+#-------- database operations --------
 
-create_table() {
+# TODO: aknowledge reprozip by using their license? Since I am using their database schema
+# should i use timestamp or integer?
+create_tables() {
   sqlite3 -batch .db \
-    "CREATE TABLE IF NOT EXISTS autogitcheck ( \
+    "CREATE TABLE IF NOT EXISTS commands ( \
       id INTEGER PRIMARY KEY AUTOINCREMENT, \
       filename TEXT NOT NULL, \
-      last_modified TIMESTAMP DEFAULT CURRENT_TIMESTAMP, \
+      last_modified TIMESTAMP DEFAULT CURRENT_TIMESTAMP, \ 
       pre_command_commit TEXT, \
       post_command_commit TEXT, \
       command TEXT\
-    );"
+    );\
+    CREATE TABLE IF NOT EXISTS processes ( \
+      id INTEGER NOT NULL PRIMARY KEY, \
+      run_id INTEGER NOT NULL, \
+      parent INTEGER, \
+      timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP, \
+      exit_code INTEGER \
+      ); \
+      CREATE TABLE IF NOT EXISTS opened_files( \
+      id INTEGER NOT NULL PRIMARY KEY, \
+      run_id INTEGER NOT NULL,
+      name TEXT NOT NULL,
+      timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP, \
+      mode INTEGER NOT NULL, \
+      is_directory BOOLEAN NOT NULL,
+      process INTEGER NOT NULL \
+      ); \
+      CREATE TABLE IF NOT EXISTS executed_files( \
+      id INTEGER NOT NULL PRIMARY KEY, \
+      name TEXT NOT NULL, \
+      run_id INTEGER NOT NULL, \
+      timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP, \
+      process INTEGER NOT NULL, \
+      argv TEXT NOT NULL, \
+      envp TEXT NOT NULL, \
+      workingdir TEXT NOT NULL, \
+      ); \
+    "
 }
 
-insert_item() {
+
+
+insert_command() {
   local filename="$1"
   local pre_commit="$2"
   local post_commit="$3"
   local command="$4"
 
-  sqlite3 .db \
-    "INSERT INTO autogitcheck (filename, pre_command_commit, post_command_commit, command) \
+  sqlite3 -batch .db \
+    "INSERT INTO commands (filename, pre_command_commit, post_command_commit, command) \
      VALUES ('$filename', '$pre_commit', '$post_commit', '$command');"
 }
 
@@ -132,7 +164,58 @@ update_post_command_commit_hash() {
     local filename="$1"
     local commit_hash="$2"
     
-    sqlite3 .db "UPDATE autogitcheck 
+    sqlite3 -batch .db "UPDATE autogitcheck 
                  SET post_command_commit = '$commit_hash' 
                  WHERE filename = '$filename';"
 }
+
+insert_process() {
+  local pid="$1"
+  local run_id="$2"
+  local parent="$3"
+  local exit_code="$4"
+
+  sqlite3 -batch .db \
+    "INSERT INTO processes (id, run_id, parent, exit_code) \
+     VALUES ($pid, $run_id, $parent, $exit_code);"
+}
+
+insert_opened_file() {
+  local pid="$1"
+  local run_id="$2"
+  local name="$3"
+  local mode="$4"
+  local is_directory="$5"
+  local process="$6"
+  sqlite3 -batch .db \
+    "INSERT INTO opened_files (id, run_id, name, mode, is_directory, process) \
+     VALUES ($pid, $run_id, '$name', $mode, $is_directory, $process);"
+}
+# ---------------- strace parsing ----------------
+parse_strace() {
+  trap - DEBUG
+  local strace_file="$1"
+  if [[ ! -f "$strace_file" ]]; then
+    echo "Strace file not found: $strace_file"
+    return 1
+  fi
+
+  echo "Parsing strace file: $strace_file"
+  while read -r line; do
+    # extract the process ID, system call, arguments and return value
+    if [[ $line =~ ^([0-9]+)\ ([a-z_]+)\((.*)\)\ =\ ([0-9-]+) ]]; then
+      local pid="${BASH_REMATCH[1]}"
+      local syscall="${BASH_REMATCH[2]}"
+      local args="${BASH_REMATCH[3]}"
+      local retval="${BASH_REMATCH[4]}"
+
+      # process the extracted information as needed
+      echo "PID: $pid, Syscall: $syscall, Args: $args, Return Value: $retval"
+      
+      
+    fi
+  done < "$strace_file"
+  echo "Strace parsing completed."
+  trap 'pre_command_git_check' DEBUG
+}
+
