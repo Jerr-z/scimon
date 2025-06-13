@@ -56,7 +56,8 @@ pre_command_git_check() {
   [[ -n ${COMP_POINT-} ]] && return 0
   
   case "$BASH_COMMAND" in
-    post_command_git_check*   |   \
+    post_command_git_check
+  *   |   \
     trap\ -*       |   \
     __vsc_*        )
       return 0
@@ -107,11 +108,18 @@ PROMPT_COMMAND='post_command_git_check'
 #-------- database operations --------
 
 # TODO: aknowledge reprozip by using their license? Since I am using their database schema
-# should i use timestamp or integer?
+
+# Variables to keep track of the last inserted row id in each table
+LAST_INSERTED_COMMAND_ID=-1
+LAST_INSERTED_PROCESS_ID=-1
+LAST_INSERTED_OPENED_FILE_ID=-1
+LAST_INSERTED_EXECUTED_FILE_ID=-1
+
+# Create the tables if they don't exist
 create_tables() {
   sqlite3 -batch .db \
     "CREATE TABLE IF NOT EXISTS commands ( \
-      id INTEGER PRIMARY KEY AUTOINCREMENT, \
+      id INTEGER NOT NULL PRIMARY KEY, \
       filename TEXT NOT NULL, \
       last_modified TIMESTAMP DEFAULT CURRENT_TIMESTAMP, \ 
       pre_command_commit TEXT, \
@@ -147,7 +155,7 @@ create_tables() {
     "
 }
 
-
+# Table operations
 
 insert_command() {
   local filename="$1"
@@ -163,33 +171,44 @@ insert_command() {
 update_post_command_commit_hash() {
     local filename="$1"
     local commit_hash="$2"
-    
+    # don't think this query is quite correct
     sqlite3 -batch .db "UPDATE autogitcheck 
                  SET post_command_commit = '$commit_hash' 
                  WHERE filename = '$filename';"
 }
 
 insert_process() {
-  local pid="$1"
-  local run_id="$2"
-  local parent="$3"
-  local exit_code="$4"
+  local run_id="$1"
+  local parent="$2"
+  local exit_code="$3"
 
   sqlite3 -batch .db \
-    "INSERT INTO processes (id, run_id, parent, exit_code) \
+    "INSERT INTO processes (run_id, parent, exit_code) \
      VALUES ($pid, $run_id, $parent, $exit_code);"
 }
 
 insert_opened_file() {
-  local pid="$1"
-  local run_id="$2"
-  local name="$3"
-  local mode="$4"
-  local is_directory="$5"
-  local process="$6"
+  local run_id="$1"
+  local name="$2"
+  local mode="$3"
+  local is_directory="$4"
+  local process="$5"
   sqlite3 -batch .db \
     "INSERT INTO opened_files (id, run_id, name, mode, is_directory, process) \
-     VALUES ($pid, $run_id, '$name', $mode, $is_directory, $process);"
+     VALUES ($run_id, '$name', $mode, $is_directory, $process);"
+}
+
+insert_executed_file() {
+  local name="$1"
+  local run_id="$2"
+  local process="$3"
+  local argv="$4"
+  local envp="$5"
+  local workingdir="$6"
+
+  sqlite3 -batch .db \
+    "INSERT INTO executed_files (name, run_id, process, argv, envp, workingdir) \
+     VALUES ('$name', $run_id, $process, '$argv', '$envp', '$workingdir');"
 }
 # ---------------- strace parsing ----------------
 parse_strace() {
