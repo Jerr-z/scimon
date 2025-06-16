@@ -4,6 +4,13 @@
 shopt -s extdebug
 
 GITCHECK_DIRS="$HOME/.autogitcheck"
+
+# Variables to keep track of the last inserted row id in each table
+LAST_INSERTED_COMMAND_ID=-1
+LAST_INSERTED_PROCESS_ID=-1
+LAST_INSERTED_OPENED_FILE_ID=-1
+LAST_INSERTED_EXECUTED_FILE_ID=-1
+
 # commit if dirty, using the supplied commit-msg
 _git_commit_if_dirty() {
   local msg="$1"
@@ -29,20 +36,23 @@ _git_commit_if_dirty() {
       fi
       if [ -n "$(git status --porcelain)" ]; then
         local dirty_files
+        local rows_to_update
         dirty_files=$(git status --porcelain | awk '{print $2}');
+        rows_to_update = ();
         # loop through all the files that are dirty
         for file in $dirty_files; do
           # insert the file into the sqlite database
-          insert_command "$file" "$(git rev-parse HEAD)" "" "$msg"
+          _insert_command "$file" "$(git rev-parse HEAD)" "" "$msg"
+          rows_to_update += ("$LAST_INSERTED_COMMAND_ID")
         done
 
         git add -A || echo "git add failed in $dir"
         git commit -m "$msg" || echo "commit failed in $dir"
 
-        for file in $dirty_files; do
+        for id in $rows_to_update; do
           # update the sqlite database with the post-command commit
           # TODO: fix how this is being called, define a local list to save all the row ids of the dirty files, then loop through them and update the hash
-          update_post_command_commit_hash "$file" "$(git rev-parse HEAD)"
+          _update_post_command_commit_hash "$id" "$(git rev-parse HEAD)"
         done
       fi
     )
@@ -50,14 +60,14 @@ _git_commit_if_dirty() {
 }
 
 # Before each user command
-pre_command_git_check() {
+_pre_command_git_check() {
 
   # skips autocompletion commands, traps, and VSCode commands
   [[ -n ${COMP_LINE-} ]] && return 0
   [[ -n ${COMP_POINT-} ]] && return 0
   
   case "$BASH_COMMAND" in
-    post_command_git_check
+    _post_command_git_check
   *   |   \
     trap\ -*       |   \
     __vsc_*        )
@@ -84,40 +94,35 @@ pre_command_git_check() {
     # TODO: pipe the output to a function that parses the strace output, then call correponding database operations
     strace -f -e trace=openat,openat2,open,creat,access,faccessat,faccessat2,statx,stat,lstat,fstat,readlink,readlinkat,rename,renameat,renameat2,link,linkat,symlink,symlinkat,mkdir,mkdirat,execve,execveat,fork,vfork,clone,clone3,connect,accept,accept4,fchownat,fchmodat -o strace.log -- "${cmd_and_args[@]}" 
     # re-install the DEBUG hook for next time
-    trap 'pre_command_git_check' DEBUG
+    trap '_pre_command_git_check' DEBUG
     # terminate the original command early so it doesn't execute the same effects twice
     return 1
   fi
   # re-install the DEBUG hook for next time
-  trap 'pre_command_git_check' DEBUG
+  trap '_pre_command_git_check' DEBUG
 }
 
 # After each user command
-post_command_git_check() {
+_post_command_git_check() {
   # again, disable DEBUG so we don't recurse when we cd/git inside here
   trap - DEBUG
 
   # use the same $PREV_CMD we saved in the DEBUG hook
   _git_commit_if_dirty "Post-command Commit: $PREV_CMD"
-  trap 'pre_command_git_check' DEBUG
+  trap '_pre_command_git_check' DEBUG
 }
 
 
-trap 'PREV_CMD=$BASH_COMMAND; pre_command_git_check' DEBUG
-PROMPT_COMMAND='post_command_git_check'
+trap 'PREV_CMD=$BASH_COMMAND; _pre_command_git_check' DEBUG
+PROMPT_COMMAND='_post_command_git_check'
 
 #-------- database operations --------
 
 # TODO: aknowledge reprozip by using their license? Since I am using their database schema
 
-# Variables to keep track of the last inserted row id in each table
-LAST_INSERTED_COMMAND_ID=-1
-LAST_INSERTED_PROCESS_ID=-1
-LAST_INSERTED_OPENED_FILE_ID=-1
-LAST_INSERTED_EXECUTED_FILE_ID=-1
 
 # Create the tables if they don't exist
-create_tables() {
+_create_tables() {
   sqlite3 -batch .db \
     "CREATE TABLE IF NOT EXISTS commands ( \
       id INTEGER NOT NULL PRIMARY KEY, \
@@ -158,7 +163,7 @@ create_tables() {
 
 # Table operations
 
-insert_command() {
+_insert_command() {
   local filename="$1"
   local pre_commit="$2"
   local post_commit="$3"
@@ -170,16 +175,15 @@ insert_command() {
   LAST_INSERTED_COMMAND_ID=$(sqlite3 -batch .db "SELECT last_insert_rowid();")
 }
 
-update_post_command_commit_hash() {
+_update_post_command_commit_hash() {
     local id="$1"
     local commit_hash="$2"
-    # don't think this query is quite correct
     sqlite3 -batch .db "UPDATE autogitcheck 
                  SET post_command_commit = '$commit_hash' 
                  WHERE id = '$id';"
 }
 
-insert_process() {
+_insert_process() {
   local run_id="$1"
   local parent="$2"
   local exit_code="$3"
@@ -187,9 +191,11 @@ insert_process() {
   sqlite3 -batch .db \
     "INSERT INTO processes (run_id, parent, exit_code) \
      VALUES ($pid, $run_id, $parent, $exit_code);"
+
+  LAST_INSERTED_PROCESS_ID=$(sqlite3 -batch .db "SELECT last_insert_rowid();")
 }
 
-insert_opened_file() {
+_insert_opened_file() {
   local run_id="$1"
   local name="$2"
   local mode="$3"
@@ -198,9 +204,11 @@ insert_opened_file() {
   sqlite3 -batch .db \
     "INSERT INTO opened_files (id, run_id, name, mode, is_directory, process) \
      VALUES ($run_id, '$name', $mode, $is_directory, $process);"
+
+  LAST_INSERTED_OPENED_FILE_ID=$(sqlite3 -batch .db "SELECT last_insert_rowid();")
 }
 
-insert_executed_file() {
+_insert_executed_file() {
   local name="$1"
   local run_id="$2"
   local process="$3"
@@ -211,9 +219,12 @@ insert_executed_file() {
   sqlite3 -batch .db \
     "INSERT INTO executed_files (name, run_id, process, argv, envp, workingdir) \
      VALUES ('$name', $run_id, $process, '$argv', '$envp', '$workingdir');"
+
+  LAST_INSERTED_EXECUTED_FILE_ID=$(sqlite3 -batch .db "SELECT last_insert_rowid();")
 }
+
 # ---------------- strace parsing ----------------
-parse_strace() {
+_parse_strace() {
   trap - DEBUG
   local strace_file="$1"
   if [[ ! -f "$strace_file" ]]; then
@@ -237,6 +248,6 @@ parse_strace() {
     fi
   done < "$strace_file"
   echo "Strace parsing completed."
-  trap 'pre_command_git_check' DEBUG
+  trap '_pre_command_git_check' DEBUG
 }
 
