@@ -3,8 +3,9 @@
 #------hook to automatically commit changes in git repositories------------
 shopt -s extdebug
 
+# Directories
 GITCHECK_DIRS="$HOME/.autogitcheck"
-
+STRACE_LOG_DIR="$HOME/.stracelog"
 # Variables to keep track of the last inserted row id in each table
 LAST_INSERTED_COMMAND_ID=-1
 LAST_INSERTED_PROCESS_ID=-1
@@ -91,7 +92,12 @@ _pre_command_git_check() {
   if [[ $type == file || $type == alias ]]; then
     echo "Running command under strace: $PREV_CMD"
     # TODO: pipe the output to a function that parses the strace output, then call correponding database operations
-    strace -f -e trace=openat,openat2,open,creat,access,faccessat,faccessat2,statx,stat,lstat,fstat,readlink,readlinkat,rename,renameat,renameat2,link,linkat,symlink,symlinkat,mkdir,mkdirat,execve,execveat,fork,vfork,clone,clone3,connect,accept,accept4,fchownat,fchmodat -o strace.log -- "${cmd_and_args[@]}" 
+    strace -f -e trace=openat,openat2,open,creat,access,faccessat,faccessat2,statx,stat,lstat,fstat,readlink,readlinkat,rename,renameat,renameat2,link,linkat,symlink,symlinkat,mkdir,mkdirat,execve,execveat,fork,vfork,clone,clone3,connect,accept,accept4,fchownat,fchmodat -o $STRACE_LOG_DIR -- "${cmd_and_args[@]}" 
+    # TODO: maybe i should parse this conditionally or at a different block...
+    _parse_strace
+    # TODO: Maybe flush out the strace log 
+
+
     # re-install the DEBUG hook for next time
     trap '_pre_command_git_check' DEBUG
     # terminate the original command early so it doesn't execute the same effects twice
@@ -225,13 +231,8 @@ _insert_executed_file() {
 # ---------------- strace parsing ----------------
 _parse_strace() {
   trap - DEBUG
-  local strace_file="$1"
-  if [[ ! -f "$strace_file" ]]; then
-    echo "Strace file not found: $strace_file"
-    return 1
-  fi
-
-  echo "Parsing strace file: $strace_file"
+  
+  echo "Parsing strace"
   while read -r line; do
     # extract the process ID, system call, arguments and return value
     if [[ $line =~ ^([0-9]+)\ ([a-z_]+)\((.*)\)\ =\ ([0-9-]+) ]]; then
@@ -243,10 +244,50 @@ _parse_strace() {
       # process the extracted information as needed
       echo "PID: $pid, Syscall: $syscall, Args: $args, Return Value: $retval"
       
-      
+      # setup case filter to redirect to different database storing functions
+      case "$syscall" in
+        fork|clone|clone3|vfork|exit)
+        # processes table
+        _handle_processes $pid $syscall $args $retval
+        ;;
+        open|openat|openat2|creat|access|faccessat|faccessat2|stat|lstat|stat64|oldstat|oldlstat|fstatat64|newfstatat|statx|readlink|readlinkat|mkdir|mkdirat|chdir|rename|renameat|renameat2|link|linkat|symlink|symlinkat|connect|accept|accept4|socketcall)
+        # handle file opening
+        _handle_file_open $pid $syscall $args $retval
+        ;;
+        execve|execveat)
+        # handle executed files
+        _handle_file_execute $pid $syscall $args $retval
+        ;;    
+        esac    
     fi
-  done < "$strace_file"
+  done < "$STRACE_LOG_DIR"
   echo "Strace parsing completed."
   trap '_pre_command_git_check' DEBUG
+}
+
+_handle_processes() {
+  # store the system calls into the processes table
+  local pid="$1"
+  local syscall="$2"
+  local args="$3"
+  local retval="$4"
+
+  # TODO: logic might be a bit ...hmm
+}
+
+_handle_file_open() {
+  # store the system calls into opened_files table
+  local pid="$1"
+  local syscall="$2"
+  local args="$3"
+  local retval="$4"
+}
+
+_handle_file_execute() {
+  # store the system calls into the executed_files table
+  local pid="$1"
+  local syscall="$2"
+  local args="$3"
+  local retval="$4"
 }
 
