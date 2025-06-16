@@ -38,12 +38,12 @@ _git_commit_if_dirty() {
         local dirty_files
         local rows_to_update
         dirty_files=$(git status --porcelain | awk '{print $2}');
-        rows_to_update = ();
+        rows_to_update=();
         # loop through all the files that are dirty
         for file in $dirty_files; do
           # insert the file into the sqlite database
           _insert_command "$file" "$(git rev-parse HEAD)" "" "$msg"
-          rows_to_update += ("$LAST_INSERTED_COMMAND_ID")
+          rows_to_update+=("$LAST_INSERTED_COMMAND_ID")
         done
 
         git add -A || echo "git add failed in $dir"
@@ -67,8 +67,7 @@ _pre_command_git_check() {
   [[ -n ${COMP_POINT-} ]] && return 0
   
   case "$BASH_COMMAND" in
-    _post_command_git_check
-  *   |   \
+    _post_command_git_check*   |   \
     trap\ -*       |   \
     __vsc_*        )
       return 0
