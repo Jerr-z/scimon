@@ -136,45 +136,52 @@ PROMPT_COMMAND='_post_command_git_check'
 _create_tables() {
   trap - DEBUG
 
-  (
-    cd "$SCIMON_DIR"
-    sqlite3 .db 'CREATE TABLE IF NOT EXISTS commands (id INTEGER NOT NULL PRIMARY KEY, 
-    filename TEXT NOT NULL,
-    last_modified TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    sqlite3 .db 'CREATE TABLE IF NOT EXISTS commands (
+    id INTEGER NOT NULL PRIMARY KEY, 
     pre_command_commit TEXT,
     post_command_commit TEXT,
-    command TEXT
+    command TEXT,
+    timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
+CREATE INDEX idx_commands_git_hash on commands(post_command_commit);
+CREATE TABLE IF NOT EXISTS changes (
+    id INTEGER NOT NULL PRIMARY KEY,
+    commit TEXT NOT NULL,
+    filename TEXT NOT NULL
+);
+CREATE INDEX idx_changes_git_hash on changes(commit);
 CREATE TABLE IF NOT EXISTS processes (
     id INTEGER NOT NULL PRIMARY KEY,
     pid INTEGER NOT NULL,
-    run_id INTEGER NOT NULL,
+    commit TEXT NOT NULL,
     parent INTEGER,
     timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     exit_code INTEGER
 );
+CREATE INDEX idx_processes_git_hash on processes(commit);
 CREATE TABLE IF NOT EXISTS opened_files (
     id INTEGER NOT NULL PRIMARY KEY,
-    run_id INTEGER NOT NULL,
-    name TEXT NOT NULL,
+    commit TEXT NOT NULL,
+    filename TEXT NOT NULL,
     timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     mode INTEGER NOT NULL,
     is_directory BOOLEAN NOT NULL,
-    process INTEGER NOT NULL
+    pid INTEGER NOT NULL
 );
+CREATE INDEX idx_opened_files_git_hash on opened_files(commit);
 CREATE TABLE IF NOT EXISTS executed_files (
     id INTEGER NOT NULL PRIMARY KEY,
-    name TEXT NOT NULL,
-    run_id INTEGER NOT NULL,
+    filename TEXT NOT NULL,
+    commit TEXT NOT NULL,
     timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    process INTEGER NOT NULL,
+    pid INTEGER NOT NULL,
     argv TEXT NOT NULL,
     envp TEXT NOT NULL,
     workingdir TEXT NOT NULL
 );
+CREATE INDEX idx_executed_files_git_hash on executed_files(commit);
 '
 
-  )
 trap '_pre_command_git_check' DEBUG
 }
 
@@ -188,15 +195,11 @@ _insert_command() {
   local post_commit="$3"
   local command="$4"
 
-  (
-    
-    cd "$SCIMON_DIR"
-    sqlite3 .db \
-    "INSERT INTO commands (filename, pre_command_commit, post_command_commit, command) \
-     VALUES ('$filename', '$pre_commit', '$post_commit', '$command');"
-    LAST_INSERTED_COMMAND_ID=$(sqlite3 .db "SELECT last_insert_rowid();")
-    
-  )
+  sqlite3 .db \
+  "INSERT INTO commands (filename, pre_command_commit, post_command_commit, command) \
+    VALUES ('$filename', '$pre_commit', '$post_commit', '$command');"
+  LAST_INSERTED_COMMAND_ID=$(sqlite3 .db "SELECT last_insert_rowid();")
+
   trap '_pre_command_git_check' DEBUG
 }
 
@@ -205,12 +208,10 @@ _update_post_command_commit_hash() {
     local id="$1"
     local commit_hash="$2"
 
-    (
-      cd "$SCIMON_DIR"
-      sqlite3 .db "UPDATE autogitcheck 
-                 SET post_command_commit = '$commit_hash' 
-                 WHERE id = '$id';"
-    )
+    sqlite3 .db "UPDATE autogitcheck 
+                SET post_command_commit = '$commit_hash' 
+                WHERE id = '$id';"
+
     trap '_pre_command_git_check' DEBUG
 }
 
@@ -220,14 +221,12 @@ _insert_process() {
   local parent="$2"
   local exit_code="$3"
 
-  (
-    cd "$SCIMON_DIR"
-    sqlite3 .db \
-    "INSERT INTO processes (run_id, parent, exit_code) \
-     VALUES ($pid, $run_id, $parent, $exit_code);"
+  sqlite3 .db \
+  "INSERT INTO processes (run_id, parent, exit_code) \
+    VALUES ($pid, $run_id, $parent, $exit_code);"
 
-    LAST_INSERTED_PROCESS_ID=$(sqlite3 .db "SELECT last_insert_rowid();")
-  )
+  LAST_INSERTED_PROCESS_ID=$(sqlite3 .db "SELECT last_insert_rowid();")
+
   trap '_pre_command_git_check' DEBUG
 }
 
@@ -246,14 +245,12 @@ _insert_opened_file() {
   local is_directory="$4"
   local process="$5"
 
-  (
-    cd "$SCIMON_DIR"
-    sqlite3 .db \
-    "INSERT INTO opened_files (id, run_id, name, mode, is_directory, process) \
-     VALUES ($run_id, '$name', $mode, $is_directory, $process);"
+  sqlite3 .db \
+  "INSERT INTO opened_files (id, run_id, name, mode, is_directory, process) \
+    VALUES ($run_id, '$name', $mode, $is_directory, $process);"
 
-    LAST_INSERTED_OPENED_FILE_ID=$(sqlite3 .db "SELECT last_insert_rowid();")
-  )
+  LAST_INSERTED_OPENED_FILE_ID=$(sqlite3 .db "SELECT last_insert_rowid();")
+
   trap '_pre_command_git_check' DEBUG
 }
 
@@ -267,14 +264,12 @@ _insert_executed_file() {
   local envp="$5"
   local workingdir="$6"
 
-  (
-    cd "$SCIMON_DIR"
-    sqlite3 .db \
-    "INSERT INTO executed_files (name, run_id, process, argv, envp, workingdir) \
-     VALUES ('$name', $run_id, $process, '$argv', '$envp', '$workingdir');"
+  sqlite3 .db \
+  "INSERT INTO executed_files (name, run_id, process, argv, envp, workingdir) \
+    VALUES ('$name', $run_id, $process, '$argv', '$envp', '$workingdir');"
 
-    LAST_INSERTED_EXECUTED_FILE_ID=$(sqlite3 .db "SELECT last_insert_rowid();")
-  )
+  LAST_INSERTED_EXECUTED_FILE_ID=$(sqlite3 .db "SELECT last_insert_rowid();")
+
   trap '_pre_command_git_check' DEBUG
 }
 
