@@ -156,9 +156,9 @@ CREATE TABLE IF NOT EXISTS processes (
     id INTEGER NOT NULL PRIMARY KEY,
     pid INTEGER NOT NULL,
     commit_hash TEXT NOT NULL,
-    parent INTEGER,
-    timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    exit_code INTEGER
+    parent_pid INTEGER,
+    child_pid INTEGER,
+    timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 CREATE INDEX IF NOT EXISTS idx_processes_git_hash on processes(commit_hash);
 CREATE TABLE IF NOT EXISTS opened_files (
@@ -221,59 +221,45 @@ _insert_file_change() {
   sqlite3 .db "INSERT INTO file_changes (commit_hash, filename) VALUES ('$commit', '$filename');"
 
 }
+#------ above are good code --------
+
 
 _insert_process() {
+  # TODO: is it possible that there might be multiple possible pids with the same child pid and commit hash?
+  local pid="$1"
+  local commit="$2"
+  local child_pid="$3"
 
-  local run_id="$1"
-  local parent="$2"
-  local exit_code="$3"
-
+  local parent_pid = $(sqlite3 .db "SELECT pid FROM processes WHERE child_pid='$pid' AND commit_hash='$commit'")
   sqlite3 .db \
-  "INSERT INTO processes (run_id, parent, exit_code) \
-    VALUES ($pid, $run_id, $parent, $exit_code);"
-
-
+  "INSERT INTO processes (pid, commit_hash, parent_pid, child_pid) \
+    VALUES ($pid, $commit, $parent_pid, $child_pid);"
 }
 
-_select_parent_process_primary_key() {
-  local parent_pid="$1"
-  # TODO: I think I'm a little bit stuck....
-  sqlite3 .db "SELECT id FROM processes WHERE pid = $parent_pid"
-}
 
 _insert_opened_file() {
-
-
-  local run_id="$1"
-  local name="$2"
+  local commit="$1"
+  local filename="$2"
   local mode="$3"
   local is_directory="$4"
-  local process="$5"
+  local pid="$5"
 
   sqlite3 .db \
-  "INSERT INTO opened_files (id, run_id, name, mode, is_directory, process) \
-    VALUES ($run_id, '$name', $mode, $is_directory, $process);"
-
-
+  "INSERT INTO opened_files (commit_hash, filename, mode, is_directory, pid) \
+    VALUES ($commit, $filename, $mode, $is_directory, $pid);"
 }
 
 _insert_executed_file() {
-
-
-  local name="$1"
-  local run_id="$2"
-  local process="$3"
+  local filename="$1"
+  local commit="$2"
+  local pid="$3"
   local argv="$4"
   local envp="$5"
   local workingdir="$6"
 
   sqlite3 .db \
-  "INSERT INTO executed_files (name, run_id, process, argv, envp, workingdir) \
-    VALUES ('$name', $run_id, $process, '$argv', '$envp', '$workingdir');"
-
-  LAST_INSERTED_EXECUTED_FILE_ID=$(sqlite3 .db "SELECT last_insert_rowid();")
-
-
+  "INSERT INTO executed_files (filename, commit_hash, pid, argv, envp, workingdir) \
+    VALUES ('$filename', $commit, $pid, '$argv', '$envp', '$workingdir');"
 }
 
 # ---------------- strace parsing ----------------
@@ -319,11 +305,8 @@ _handle_processes() {
   local syscall="$2"
   local args="$3"
   local retval="$4"
-
-  if [[ "$retval" =~ ^[0-9]+$ ]] && [[ "$retval" -gt 0 ]]; then 
-    local parent_id
-    parent_id=''
-  fi
+  # i think its fine to call git directly cuz parent function should be invoked in the proper git directory
+  _insert_process $pid "$(git rev-parse HEAD)" $retval
 }
 
 _handle_file_open() {
@@ -332,6 +315,20 @@ _handle_file_open() {
   local syscall="$2"
   local args="$3"
   local retval="$4"
+
+  # process arguments first
+  local filename=$(printf '%s' "$args" | sed -E 's/^"([^"]+)".*$/\1/')
+  local mode=""
+  local is_dir
+  if [[ "$args" =~ ,[[:space:]]*([0-7]{3,4}) ]]; then
+    mode="${BASH_REMATCH[1]}"
+  fi
+
+  # Check on-disk if it’s a directory
+  [[ -d "$filename" ]] && is_dir=1 || is_dir=0
+
+  # store into db
+  _insert_opened_file "$(git rev-parse HEAD)" $filename $mode $is_dir $pid
 }
 
 _handle_file_execute() {
