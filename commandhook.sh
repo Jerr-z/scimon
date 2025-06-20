@@ -4,23 +4,20 @@
 shopt -s extdebug
 
 # Directories
-SCIMON_DIR="$HOME/.scimon"
 GITCHECK_DIRS="$HOME/.scimon/.autogitcheck"
 STRACE_LOG_DIR="$HOME/.scimon/strace.log"
-DATABASE_NAME=".db"
+
 # Variables to keep track of the last inserted row id in each table
 # TODO: find a good way to keep track of these, im suggesting atomic counter in the db :)
-LAST_INSERTED_COMMAND_ID=-1
-LAST_INSERTED_PROCESS_ID=-1
-LAST_INSERTED_OPENED_FILE_ID=-1
-LAST_INSERTED_EXECUTED_FILE_ID=-1
+
 
 # commit if dirty, using the supplied commit-msg
 _git_commit_if_dirty() {
   local msg="$1"
+  local is_pre_command="$2"
   while IFS="" read -r dir || [ -n "$dir" ] 
   do
-    echo "Checking directory: $dir $msg"
+    echo "Checking directory: $dir $msg $is_pre_command"
     [[ -z "$dir" ]] && continue
     (
       # change directory to the git repo, or skip if it doesn't exist
@@ -29,7 +26,7 @@ _git_commit_if_dirty() {
       if [[ ! -d .git ]]; then
         # TODO: this part might not work well, need to fix later
         echo "$dir isn't a git repository, would you like to initialize a git repository in $dir? (y/n)"
-        read -r answer
+        read -r answer </dev/tty
         if [[ "$answer" == "y" || "$answer" == "Y" ]]; then
           git init
           git add -A
@@ -39,24 +36,29 @@ _git_commit_if_dirty() {
           return
         fi
       fi
+
+      # if git status isn't clean we will create a commit
       if [ -n "$(git status --porcelain)" ]; then
         local dirty_files
-        local rows_to_update
-        dirty_files=$(git status --porcelain | awk '{print $2}');
-        rows_to_update=();
-        # loop through all the files that are dirty
-        for file in $dirty_files; do
-          # insert the file into the sqlite database
-          _insert_command "$file" "$(git rev-parse HEAD)" "" "$msg"
-          rows_to_update+=("$LAST_INSERTED_COMMAND_ID")
-        done
 
+        # when we are doing pre-command git check and see dirty files, simply commit. No need to add a command into the db.
+        if (( ! is_pre_command )); then
+          _insert_command "$(git rev-parse HEAD)" "" "$msg"
+        fi
+
+        dirty_files=$(git status --porcelain | awk '{print $2}');
+        
+        
         git add -A || echo "git add failed in $dir"
         git commit -m "$msg" || echo "commit failed in $dir"
 
-        for id in "${rows_to_update[@]}"; do
-          # update the sqlite database with the post-command commit
-          _update_post_command_commit_hash "$id" "$(git rev-parse HEAD)"
+        if (( ! is_pre_command )); then
+          _update_post_command_commit_hash "$(git rev-parse HEAD^)" "$(git rev-parse HEAD)"
+          _parse_strace
+        fi
+
+        for file in $dirty_files; do
+          _insert_file_change "$(git rev-parse HEAD)" "$file"
         done
       fi
     )
@@ -94,15 +96,12 @@ _pre_command_git_check() {
   local type
   type=$(type -t -- "${cmd_and_args[0]}")
   # do our check
-  _git_commit_if_dirty "Pre-command Commit: $PREV_CMD"
+  _git_commit_if_dirty "$PREV_CMD" 1
 
   if [[ $type == file || $type == alias ]]; then
     echo "Running command under strace: $PREV_CMD"
     strace -f -e trace=openat,openat2,open,creat,access,faccessat,faccessat2,statx,stat,lstat,fstat,readlink,readlinkat,rename,renameat,renameat2,link,linkat,symlink,symlinkat,mkdir,mkdirat,execve,execveat,fork,vfork,clone,clone3,connect,accept,accept4,fchownat,fchmodat -o $STRACE_LOG_DIR -- "${cmd_and_args[@]}" 
-    # TODO: maybe i should parse this conditionally or at a different block...
-    _parse_strace
     # TODO: Maybe flush out the strace log 
-
 
     # re-install the DEBUG hook for next time
     trap '_pre_command_git_check' DEBUG
@@ -119,7 +118,7 @@ _post_command_git_check() {
   trap - DEBUG
 
   # use the same $PREV_CMD we saved in the DEBUG hook
-  _git_commit_if_dirty "Post-command Commit: $PREV_CMD"
+  _git_commit_if_dirty "$PREV_CMD" 0
   trap '_pre_command_git_check' DEBUG
 }
 
@@ -143,43 +142,44 @@ _create_tables() {
     command TEXT,
     timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
-CREATE INDEX idx_commands_git_hash on commands(post_command_commit);
-CREATE TABLE IF NOT EXISTS changes (
+CREATE INDEX IF NOT EXISTS idx_commands_pre_commit ON commands(pre_command_commit);
+CREATE INDEX IF NOT EXISTS idx_commands_post_commit on commands(post_command_commit);
+CREATE TABLE IF NOT EXISTS file_changes (
     id INTEGER NOT NULL PRIMARY KEY,
-    commit TEXT NOT NULL,
+    commit_hash TEXT NOT NULL,
     filename TEXT NOT NULL
 );
-CREATE INDEX idx_changes_git_hash on changes(commit);
+CREATE INDEX idx_changes_git_hash on file_changes(commit_hash);
 CREATE TABLE IF NOT EXISTS processes (
     id INTEGER NOT NULL PRIMARY KEY,
     pid INTEGER NOT NULL,
-    commit TEXT NOT NULL,
+    commit_hash TEXT NOT NULL,
     parent INTEGER,
     timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     exit_code INTEGER
 );
-CREATE INDEX idx_processes_git_hash on processes(commit);
+CREATE INDEX idx_processes_git_hash on processes(commit_hash);
 CREATE TABLE IF NOT EXISTS opened_files (
     id INTEGER NOT NULL PRIMARY KEY,
-    commit TEXT NOT NULL,
+    commit_hash TEXT NOT NULL,
     filename TEXT NOT NULL,
     timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     mode INTEGER NOT NULL,
     is_directory BOOLEAN NOT NULL,
     pid INTEGER NOT NULL
 );
-CREATE INDEX idx_opened_files_git_hash on opened_files(commit);
+CREATE INDEX idx_opened_files_git_hash on opened_files(commit_hash);
 CREATE TABLE IF NOT EXISTS executed_files (
     id INTEGER NOT NULL PRIMARY KEY,
     filename TEXT NOT NULL,
-    commit TEXT NOT NULL,
+    commit_hash TEXT NOT NULL,
     timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     pid INTEGER NOT NULL,
     argv TEXT NOT NULL,
     envp TEXT NOT NULL,
     workingdir TEXT NOT NULL
 );
-CREATE INDEX idx_executed_files_git_hash on executed_files(commit);
+CREATE INDEX idx_executed_files_git_hash on executed_files(commit_hash);
 '
 
 trap '_pre_command_git_check' DEBUG
@@ -189,34 +189,39 @@ trap '_pre_command_git_check' DEBUG
 # Table operations
 
 _insert_command() {
-  trap - DEBUG
-  local filename="$1"
-  local pre_commit="$2"
-  local post_commit="$3"
-  local command="$4"
+
+  local pre_commit="$1"
+  local post_commit="$2"
+  local command="$3"
 
   sqlite3 .db \
-  "INSERT INTO commands (filename, pre_command_commit, post_command_commit, command) \
-    VALUES ('$filename', '$pre_commit', '$post_commit', '$command');"
-  LAST_INSERTED_COMMAND_ID=$(sqlite3 .db "SELECT last_insert_rowid();")
+  "INSERT INTO commands (pre_command_commit, post_command_commit, command) \
+    VALUES ('$pre_commit', '$post_commit', '$command');"
 
-  trap '_pre_command_git_check' DEBUG
 }
 
 _update_post_command_commit_hash() {
-    trap - DEBUG
-    local id="$1"
-    local commit_hash="$2"
 
-    sqlite3 .db "UPDATE autogitcheck 
-                SET post_command_commit = '$commit_hash' 
-                WHERE id = '$id';"
+    local pre_command_commit="$1"
+    local post_command_commit="$2"
 
-    trap '_pre_command_git_check' DEBUG
+    sqlite3 .db "UPDATE commands 
+                SET post_command_commit = '$post_command_commit' 
+                WHERE pre_command_commit = '$pre_command_commit';"
+
+}
+
+_insert_file_change() {
+
+  local commit="$1"
+  local filename="$2"
+
+  sqlite3 .db "INSERT INTO file_changes (commit_hash, filename) VALUES ('$commit', '$filename');"
+
 }
 
 _insert_process() {
-  trap - DEBUG
+
   local run_id="$1"
   local parent="$2"
   local exit_code="$3"
@@ -225,9 +230,7 @@ _insert_process() {
   "INSERT INTO processes (run_id, parent, exit_code) \
     VALUES ($pid, $run_id, $parent, $exit_code);"
 
-  LAST_INSERTED_PROCESS_ID=$(sqlite3 .db "SELECT last_insert_rowid();")
 
-  trap '_pre_command_git_check' DEBUG
 }
 
 _select_parent_process_primary_key() {
@@ -237,7 +240,7 @@ _select_parent_process_primary_key() {
 }
 
 _insert_opened_file() {
-  trap - DEBUG
+
 
   local run_id="$1"
   local name="$2"
@@ -249,13 +252,11 @@ _insert_opened_file() {
   "INSERT INTO opened_files (id, run_id, name, mode, is_directory, process) \
     VALUES ($run_id, '$name', $mode, $is_directory, $process);"
 
-  LAST_INSERTED_OPENED_FILE_ID=$(sqlite3 .db "SELECT last_insert_rowid();")
 
-  trap '_pre_command_git_check' DEBUG
 }
 
 _insert_executed_file() {
-  trap - DEBUG
+
 
   local name="$1"
   local run_id="$2"
@@ -270,12 +271,12 @@ _insert_executed_file() {
 
   LAST_INSERTED_EXECUTED_FILE_ID=$(sqlite3 .db "SELECT last_insert_rowid();")
 
-  trap '_pre_command_git_check' DEBUG
+
 }
 
 # ---------------- strace parsing ----------------
 _parse_strace() {
-  trap - DEBUG
+
   
   echo "Parsing strace"
   while read -r line; do
@@ -307,7 +308,7 @@ _parse_strace() {
     fi
   done < "$STRACE_LOG_DIR"
   echo "Strace parsing completed."
-  trap '_pre_command_git_check' DEBUG
+
 }
 
 _handle_processes() {
