@@ -126,6 +126,8 @@ _post_command_git_check() {
 trap 'PREV_CMD=$BASH_COMMAND; _pre_command_git_check' DEBUG
 PROMPT_COMMAND='_post_command_git_check'
 
+# TODO: create initialization functions to setup the git repository
+
 #-------- database operations --------
 
 # TODO: aknowledge reprozip by using their license? Since I am using their database schema
@@ -149,7 +151,7 @@ CREATE TABLE IF NOT EXISTS file_changes (
     commit_hash TEXT NOT NULL,
     filename TEXT NOT NULL
 );
-CREATE INDEX idx_changes_git_hash on file_changes(commit_hash);
+CREATE INDEX IF NOT EXISTS idx_changes_git_hash on file_changes(commit_hash);
 CREATE TABLE IF NOT EXISTS processes (
     id INTEGER NOT NULL PRIMARY KEY,
     pid INTEGER NOT NULL,
@@ -158,7 +160,7 @@ CREATE TABLE IF NOT EXISTS processes (
     timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     exit_code INTEGER
 );
-CREATE INDEX idx_processes_git_hash on processes(commit_hash);
+CREATE INDEX IF NOT EXISTS idx_processes_git_hash on processes(commit_hash);
 CREATE TABLE IF NOT EXISTS opened_files (
     id INTEGER NOT NULL PRIMARY KEY,
     commit_hash TEXT NOT NULL,
@@ -168,7 +170,7 @@ CREATE TABLE IF NOT EXISTS opened_files (
     is_directory BOOLEAN NOT NULL,
     pid INTEGER NOT NULL
 );
-CREATE INDEX idx_opened_files_git_hash on opened_files(commit_hash);
+CREATE INDEX IF NOT EXISTS idx_opened_files_git_hash on opened_files(commit_hash);
 CREATE TABLE IF NOT EXISTS executed_files (
     id INTEGER NOT NULL PRIMARY KEY,
     filename TEXT NOT NULL,
@@ -179,7 +181,7 @@ CREATE TABLE IF NOT EXISTS executed_files (
     envp TEXT NOT NULL,
     workingdir TEXT NOT NULL
 );
-CREATE INDEX idx_executed_files_git_hash on executed_files(commit_hash);
+CREATE INDEX IF NOT EXISTS idx_executed_files_git_hash on executed_files(commit_hash);
 '
 
 trap '_pre_command_git_check' DEBUG
