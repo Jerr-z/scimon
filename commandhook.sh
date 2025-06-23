@@ -343,5 +343,39 @@ _handle_file_execute() {
   local syscall="$2"
   local args="$3"
   local retval="$4"
+  
+  if [[ "$syscall" == "execve" ]]; then
+    # Expected format:
+    # "filename", [argv], envp (which may include comments)
+    local regex='^"([^"]+)",[[:space:]]*(\[[^]]+\]),[[:space:]]*(.+)$'
+    if [[ $args =~ $regex ]]; then
+      local filename="${BASH_REMATCH[1]}"
+      local argv="${BASH_REMATCH[2]}"
+      local envp="${BASH_REMATCH[3]}"
+    else
+      echo "Failed to parse execve args: $args"
+      return 1
+    fi
+  elif [[ "$syscall" == "execveat" ]]; then
+    # Expected format for execveat:
+    # AT_FDCWD, "filename", [argv], [envp], flag
+    # We ignore the first parameter and the last flag.
+    local regex='^[^,]+,\s*"([^"]+)",\s*(\[[^]]+\]),\s*(\[[^]]+\])'
+    if [[ $args =~ $regex ]]; then
+      local filename="${BASH_REMATCH[1]}"
+      local argv="${BASH_REMATCH[2]}"
+      local envp="${BASH_REMATCH[3]}"
+    else
+      echo "Failed to parse execveat args: $args"
+      return 1
+    fi
+  fi
+  
+  # remove trailing comments from envp
+  envp=$(echo "$envp" | sed -E 's/[[:space:]]*\/\*.*\*\/[[:space:]]*$//')
+  
+  echo "Exec: PID: $pid, filename: $filename, argv: $argv, envp: $envp, retval: $retval"
+
+  _insert_executed_file "$filename" "$(git rev-parse HEAD)" "$pid" "$argv" "$envp" "$workingdir"
 }
 
