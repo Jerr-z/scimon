@@ -7,128 +7,6 @@ shopt -s extdebug
 GITCHECK_DIRS="$HOME/.scimon/.autogitcheck"
 STRACE_LOG_DIR="$HOME/.scimon/strace.log"
 
-# Variables to keep track of the last inserted row id in each table
-# TODO: find a good way to keep track of these, im suggesting atomic counter in the db :)
-
-
-# commit if dirty, using the supplied commit-msg
-_git_commit_if_dirty() {
-  local msg="$1"
-  local is_pre_command="$2"
-  while IFS="" read -r dir || [ -n "$dir" ] 
-  do
-    echo "Checking directory: $dir $msg $is_pre_command"
-    [[ -z "$dir" ]] && continue
-    (
-      # change directory to the git repo, or skip if it doesn't exist
-      cd "$HOME/$dir" 2>/dev/null || echo "Cannot access $dir, skipping...";
-
-      if [[ ! -d .git ]]; then
-        # TODO: this part might not work well, need to fix later
-        echo "$dir isn't a git repository, would you like to initialize a git repository in $dir? (y/n)"
-        read -r answer </dev/tty
-        if [[ "$answer" == "y" || "$answer" == "Y" ]]; then
-          git init
-          git add -A
-          git commit -m "Initial commit"
-        else
-          echo "Skipping $dir, not a git repository."
-          return
-        fi
-      fi
-
-      # if git status isn't clean we will create a commit
-      if [ -n "$(git status --porcelain)" ]; then
-        local dirty_files
-
-        # when we are doing pre-command git check and see dirty files, simply commit. No need to add a command into the db.
-        if (( ! is_pre_command )); then
-          _insert_command "$(git rev-parse HEAD)" "" "$msg"
-        fi
-
-        dirty_files=$(git status --porcelain | awk '{print $2}');
-        
-        
-        git add -A || echo "git add failed in $dir"
-        git commit -m "$msg" || echo "commit failed in $dir"
-
-        if (( ! is_pre_command )); then
-          _update_post_command_commit_hash "$(git rev-parse HEAD^)" "$(git rev-parse HEAD)"
-          _parse_strace
-        fi
-
-        for file in $dirty_files; do
-          _insert_file_change "$(git rev-parse HEAD)" "$file"
-        done
-      fi
-    )
-  done < "$GITCHECK_DIRS"
-}
-
-# Before each user command
-_pre_command_git_check() {
-  # Skip commands with heredoc redirection that can break strace
-  if [[ "$BASH_COMMAND" == *'<<'* ]]; then
-      return 0
-  fi
-
-  # skips autocompletion commands, traps, and VSCode commands
-  [[ -n ${COMP_LINE-} ]] && return 0
-  [[ -n ${COMP_POINT-} ]] && return 0
-  # Is source skippable?
-  case "$BASH_COMMAND" in
-    _post_command_git_check*   |   \
-    trap\ -*       |   \
-    __vsc_*        | \
-    source*) 
-      return 0
-      ;;
-  esac
-  # turn off the DEBUG trap so nothing inside re-triggers us
-  trap - DEBUG
-
-  # capture what command is about to run
-  PREV_CMD="$BASH_COMMAND"
-
-  local cmd_and_args=()
-  # split the command into an array to handle cases with spaces
-  read -r -a cmd_and_args <<< "$PREV_CMD"
-
-  local type
-  type=$(type -t -- "${cmd_and_args[0]}")
-  # do our check
-  _git_commit_if_dirty "$PREV_CMD" 1
-
-  if [[ $type == file || $type == alias ]]; then
-    echo "Running command under strace: $PREV_CMD"
-    strace -f -e trace=openat,openat2,open,creat,access,faccessat,faccessat2,statx,stat,lstat,fstat,readlink,readlinkat,rename,renameat,renameat2,link,linkat,symlink,symlinkat,mkdir,mkdirat,execve,execveat,fork,vfork,clone,clone3,connect,accept,accept4,fchownat,fchmodat -o $STRACE_LOG_DIR -- "${cmd_and_args[@]}" 
-    # TODO: Maybe flush out the strace log 
-
-    # re-install the DEBUG hook for next time
-    trap '_pre_command_git_check' DEBUG
-    # terminate the original command early so it doesn't execute the same effects twice
-    return 1
-  fi
-  # re-install the DEBUG hook for next time
-  trap '_pre_command_git_check' DEBUG
-}
-
-# After each user command
-_post_command_git_check() {
-  # again, disable DEBUG so we don't recurse when we cd/git inside here
-  trap - DEBUG
-
-  # use the same $PREV_CMD we saved in the DEBUG hook
-  _git_commit_if_dirty "$PREV_CMD" 0
-  trap '_pre_command_git_check' DEBUG
-}
-
-
-trap 'PREV_CMD=$BASH_COMMAND; _pre_command_git_check' DEBUG
-PROMPT_COMMAND='_post_command_git_check'
-
-# TODO: create initialization functions to setup the git repository
-
 #-------- database operations --------
 
 # TODO: aknowledge reprozip by using their license? Since I am using their database schema
@@ -136,7 +14,7 @@ PROMPT_COMMAND='_post_command_git_check'
 
 # Create the tables if they don't exist
 _create_tables() {
-  trap - DEBUG
+
 
     sqlite3 .db 'CREATE TABLE IF NOT EXISTS commands (
     id INTEGER NOT NULL PRIMARY KEY, 
@@ -185,7 +63,6 @@ CREATE TABLE IF NOT EXISTS executed_files (
 CREATE INDEX IF NOT EXISTS idx_executed_files_git_hash on executed_files(commit_hash);
 '
 
-trap '_pre_command_git_check' DEBUG
 }
 
 
@@ -253,7 +130,7 @@ _insert_opened_file() {
     VALUES ('$commit', '$filename', $mode, $is_directory, $pid);"
 }
 
-#------ above are good code --------
+
 _insert_executed_file() {
   local filename="$1"
   local commit="$2"
@@ -374,8 +251,130 @@ _handle_file_execute() {
   # remove trailing comments from envp
   envp=$(echo "$envp" | sed -E 's/[[:space:]]*\/\*.*\*\/[[:space:]]*$//')
   
-  echo "Exec: PID: $pid, filename: $filename, argv: $argv, envp: $envp, retval: $retval"
+  # echo "Exec: PID: $pid, filename: $filename, argv: $argv, envp: $envp, retval: $retval"
 
   _insert_executed_file "$filename" "$(git rev-parse HEAD)" "$pid" "$argv" "$envp" "$workingdir"
 }
+
+
+# ---------------------- MAIN HOOK LOGIC ---------------------------
+
+
+_git_commit_if_dirty() {
+  local msg="$1"
+  local is_pre_command="$2"
+  while IFS="" read -r dir || [ -n "$dir" ] 
+  do
+    echo "Checking directory: $dir $msg $is_pre_command"
+    [[ -z "$dir" ]] && continue
+    (
+      # change directory to the git repo, or skip if it doesn't exist
+      cd "$HOME/$dir" 2>/dev/null || echo "Cannot access $dir, skipping...";
+
+      if [[ ! -d .git ]]; then
+        # TODO: this part might not work well, need to fix later
+        echo "$dir isn't a git repository, would you like to initialize a git repository in $dir? (y/n)"
+        read -r answer </dev/tty
+        if [[ "$answer" == "y" || "$answer" == "Y" ]]; then
+          git init
+          git add -A
+          git commit -m "Initial commit"
+          _create_tables
+        else
+          echo "Skipping $dir, not a git repository."
+          return
+        fi
+      fi
+
+      # if git status isn't clean we will create a commit
+      if [ -n "$(git status --porcelain)" ]; then
+        local dirty_files
+
+        # when we are doing pre-command git check and see dirty files, simply commit. No need to add a command into the db.
+        if (( ! is_pre_command )); then
+          _insert_command "$(git rev-parse HEAD)" "" "$msg"
+        fi
+
+        dirty_files=$(git status --porcelain | awk '{print $2}');
+        
+        
+        git add -A || echo "git add failed in $dir"
+        git commit -m "$msg" || echo "commit failed in $dir"
+
+        if (( ! is_pre_command )); then
+          _update_post_command_commit_hash "$(git rev-parse HEAD^)" "$(git rev-parse HEAD)"
+          _parse_strace
+        fi
+
+        for file in $dirty_files; do
+          _insert_file_change "$(git rev-parse HEAD)" "$file"
+        done
+      fi
+    )
+  done < "$GITCHECK_DIRS"
+}
+
+# Before each user command
+_pre_command_git_check() {
+  # Skip commands with heredoc redirection that can break strace
+  if [[ "$BASH_COMMAND" == *'<<'* ]]; then
+      return 0
+  fi
+
+  # skips autocompletion commands, traps, and VSCode commands
+  [[ -n ${COMP_LINE-} ]] && return 0
+  [[ -n ${COMP_POINT-} ]] && return 0
+  # Is source skippable?
+  case "$BASH_COMMAND" in
+    _post_command_git_check*   |   \
+    trap\ -*       |   \
+    __vsc_*        | \
+    source*) 
+      return 0
+      ;;
+  esac
+  # turn off the DEBUG trap so nothing inside re-triggers us
+  trap - DEBUG
+
+  # capture what command is about to run
+  PREV_CMD="$BASH_COMMAND"
+
+  local cmd_and_args=()
+  # split the command into an array to handle cases with spaces
+  read -r -a cmd_and_args <<< "$PREV_CMD"
+
+  local type
+  type=$(type -t -- "${cmd_and_args[0]}")
+  # do our check
+  _git_commit_if_dirty "$PREV_CMD" 1
+
+  if [[ $type == file || $type == alias ]]; then
+    echo "Running command under strace: $PREV_CMD"
+    strace -f -e trace=openat,openat2,open,creat,access,faccessat,faccessat2,statx,stat,lstat,fstat,readlink,readlinkat,rename,renameat,renameat2,link,linkat,symlink,symlinkat,mkdir,mkdirat,execve,execveat,fork,vfork,clone,clone3,connect,accept,accept4,fchownat,fchmodat -o $STRACE_LOG_DIR -- "${cmd_and_args[@]}" 
+    # TODO: Maybe flush out the strace log 
+
+    # re-install the DEBUG hook for next time
+    trap '_pre_command_git_check' DEBUG
+    # terminate the original command early so it doesn't execute the same effects twice
+    return 1
+  fi
+  # re-install the DEBUG hook for next time
+  trap '_pre_command_git_check' DEBUG
+}
+
+# After each user command
+_post_command_git_check() {
+  # again, disable DEBUG so we don't recurse when we cd/git inside here
+  trap - DEBUG
+
+  # use the same $PREV_CMD we saved in the DEBUG hook
+  _git_commit_if_dirty "$PREV_CMD" 0
+  trap '_pre_command_git_check' DEBUG
+}
+
+
+trap 'PREV_CMD=$BASH_COMMAND; _pre_command_git_check' DEBUG
+PROMPT_COMMAND='_post_command_git_check'
+
+
 
