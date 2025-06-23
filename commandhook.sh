@@ -75,11 +75,12 @@ _pre_command_git_check() {
   # skips autocompletion commands, traps, and VSCode commands
   [[ -n ${COMP_LINE-} ]] && return 0
   [[ -n ${COMP_POINT-} ]] && return 0
-  
+  # Is source skippable?
   case "$BASH_COMMAND" in
     _post_command_git_check*   |   \
     trap\ -*       |   \
-    __vsc_*        )
+    __vsc_*        | \
+    source*) 
       return 0
       ;;
   esac
@@ -221,7 +222,7 @@ _insert_file_change() {
   sqlite3 .db "INSERT INTO file_changes (commit_hash, filename) VALUES ('$commit', '$filename');"
 
 }
-#------ above are good code --------
+
 
 
 _insert_process() {
@@ -230,10 +231,13 @@ _insert_process() {
   local commit="$2"
   local child_pid="$3"
 
-  local parent_pid = $(sqlite3 .db "SELECT pid FROM processes WHERE child_pid='$pid' AND commit_hash='$commit'")
+  local parent_pid=$(sqlite3 .db "SELECT pid FROM processes WHERE child_pid='$pid' AND commit_hash='$commit'")
+  if [[ -z "$parent_pid" ]]; then
+    parent_pid="NULL"
+  fi
   sqlite3 .db \
   "INSERT INTO processes (pid, commit_hash, parent_pid, child_pid) \
-    VALUES ($pid, $commit, $parent_pid, $child_pid);"
+    VALUES ($pid, '$commit', $parent_pid, $child_pid);"
 }
 
 
@@ -246,9 +250,10 @@ _insert_opened_file() {
 
   sqlite3 .db \
   "INSERT INTO opened_files (commit_hash, filename, mode, is_directory, pid) \
-    VALUES ($commit, $filename, $mode, $is_directory, $pid);"
+    VALUES ('$commit', '$filename', $mode, $is_directory, $pid);"
 }
 
+#------ above are good code --------
 _insert_executed_file() {
   local filename="$1"
   local commit="$2"
@@ -259,7 +264,7 @@ _insert_executed_file() {
 
   sqlite3 .db \
   "INSERT INTO executed_files (filename, commit_hash, pid, argv, envp, workingdir) \
-    VALUES ('$filename', $commit, $pid, '$argv', '$envp', '$workingdir');"
+    VALUES ('$filename', '$commit', $pid, '$argv', '$envp', '$workingdir');"
 }
 
 # ---------------- strace parsing ----------------
@@ -267,14 +272,14 @@ _parse_strace() {
 
   
   echo "Parsing strace"
-  while read -r line; do
+  while IFS= read -r line || [[ -n "$line" ]]; do
     # extract the process ID, system call, arguments and return value
-    if [[ $line =~ ^([0-9]+)\ ([a-z_]+)\((.*)\)\ =\ ([0-9-]+) ]]; then
+    if [[ $line =~ ^([0-9]+)\ ([a-z0-9_]+)\((.*)\)\ =\ ([0-9-]+) ]]; then
       local pid="${BASH_REMATCH[1]}"
       local syscall="${BASH_REMATCH[2]}"
       local args="${BASH_REMATCH[3]}"
       local retval="${BASH_REMATCH[4]}"
-
+      
       # process the extracted information as needed
       #echo "PID: $pid, Syscall: $syscall, Args: $args, Return Value: $retval"
       
@@ -282,15 +287,15 @@ _parse_strace() {
       case "$syscall" in
         fork|clone|clone3|vfork)
         # processes table
-        _handle_processes $pid $syscall $args $retval
+        _handle_processes "$pid" "$syscall" "$args" "$retval"
         ;;
         open|openat|openat2|creat|access|faccessat|faccessat2|stat|lstat|stat64|oldstat|oldlstat|fstatat64|newfstatat|statx|readlink|readlinkat|mkdir|mkdirat|chdir|rename|renameat|renameat2|link|linkat|symlink|symlinkat|connect|accept|accept4|socketcall)
         # handle file opening
-        _handle_file_open $pid $syscall $args $retval
+        _handle_file_open "$pid" "$syscall" "$args" "$retval"
         ;;
         execve|execveat)
         # handle executed files
-        _handle_file_execute $pid $syscall $args $retval
+        _handle_file_execute "$pid" "$syscall" "$args" "$retval"
         ;;    
         esac    
     fi
@@ -305,8 +310,9 @@ _handle_processes() {
   local syscall="$2"
   local args="$3"
   local retval="$4"
+
   # i think its fine to call git directly cuz parent function should be invoked in the proper git directory
-  _insert_process $pid "$(git rev-parse HEAD)" $retval
+  _insert_process "$pid" "$(git rev-parse HEAD)" "$retval"
 }
 
 _handle_file_open() {
@@ -317,8 +323,8 @@ _handle_file_open() {
   local retval="$4"
 
   # process arguments first
-  local filename=$(printf '%s' "$args" | sed -E 's/^"([^"]+)".*$/\1/')
-  local mode=""
+  local filename=$(printf '%s' "$args" | sed -E 's/.*"([^"]+)".*/\1/')
+  local mode=-1
   local is_dir
   if [[ "$args" =~ ,[[:space:]]*([0-7]{3,4}) ]]; then
     mode="${BASH_REMATCH[1]}"
@@ -328,7 +334,7 @@ _handle_file_open() {
   [[ -d "$filename" ]] && is_dir=1 || is_dir=0
 
   # store into db
-  _insert_opened_file "$(git rev-parse HEAD)" $filename $mode $is_dir $pid
+  _insert_opened_file "$(git rev-parse HEAD)" "$filename" "$mode" "$is_dir" "$pid"
 }
 
 _handle_file_execute() {
