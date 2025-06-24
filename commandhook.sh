@@ -73,7 +73,9 @@ _insert_command() {
   local pre_commit="$1"
   local post_commit="$2"
   local command="$3"
-
+  
+  # escape single quotes
+  command="${command//\'/\'\'}"
   sqlite3 .db \
   "INSERT INTO commands (pre_command_commit, post_command_commit, command) \
     VALUES ('$pre_commit', '$post_commit', '$command');"
@@ -247,7 +249,7 @@ _handle_file_execute() {
       return 1
     fi
   fi
-  
+  argv="${argv//\'/\'\'}"
   # remove trailing comments from envp
   envp=$(echo "$envp" | sed -E 's/[[:space:]]*\/\*.*\*\/[[:space:]]*$//')
   
@@ -334,8 +336,10 @@ _pre_command_git_check() {
       ;;
   esac
   # turn off the DEBUG trap so nothing inside re-triggers us
+  # DO NOT PUT ANY HOOK LOGIC ABOVE THIS SINCE IT WILL TRIGGER RECURSION
   trap - DEBUG
-
+  # just curious
+  
   # capture what command is about to run
   PREV_CMD="$BASH_COMMAND"
 
@@ -347,9 +351,17 @@ _pre_command_git_check() {
   type=$(type -t -- "${cmd_and_args[0]}")
   # do our check
   _git_commit_if_dirty "$PREV_CMD" 1
-  # special case, if there is a pipe
-  
 
+  # handle pipes
+  local full_cmd=$(history 1 | sed -E 's/^[[:space:]]*[0-9]+[[:space:]]*//')
+  # echo "command to be executed: $full_cmd"
+  if [[ "$full_cmd" == *"|"* ]]; then
+    echo "Running *pipe* command under strace: $full_cmd"
+    strace -f -e trace=openat,openat2,open,creat,access,faccessat,faccessat2,statx,stat,lstat,fstat,readlink,readlinkat,rename,renameat,renameat2,link,linkat,symlink,symlinkat,mkdir,mkdirat,execve,execveat,fork,vfork,clone,clone3,connect,accept,accept4,fchownat,fchmodat -o $STRACE_LOG_DIR -- bash -c "$full_cmd"
+    # don't reinstall DEBUG hook until everything finishes execution (post command will handle that)
+    return 1
+  fi
+  # normal case
   if [[ $type == file || $type == alias ]]; then
     echo "Running command under strace: $PREV_CMD"
     strace -f -e trace=openat,openat2,open,creat,access,faccessat,faccessat2,statx,stat,lstat,fstat,readlink,readlinkat,rename,renameat,renameat2,link,linkat,symlink,symlinkat,mkdir,mkdirat,execve,execveat,fork,vfork,clone,clone3,connect,accept,accept4,fchownat,fchmodat -o $STRACE_LOG_DIR -- "${cmd_and_args[@]}" 
