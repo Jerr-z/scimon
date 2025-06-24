@@ -287,15 +287,15 @@ _git_commit_if_dirty() {
       fi
 
       # if git status isn't clean we will create a commit
-      if [ -n "$(git status --porcelain)" ]; then
+      if [ -n "$(git status --porcelain --untracked-files=all)" ]; then
         local dirty_files
 
         # when we are doing pre-command git check and see dirty files, simply commit. No need to add a command into the db.
         if (( ! is_pre_command )); then
-          _insert_command "$(git rev-parse HEAD)" "" "$msg"
+          _insert_command "$(git rev-parse HEAD)" "" "$(history 1 | sed -E 's/^[[:space:]]*[0-9]+[[:space:]]*//')"
         fi
 
-        dirty_files=$(git status --porcelain | awk '{print $2}');
+        dirty_files=$(git status --porcelain --untracked-files=all | awk '{print $2}');
         
         
         git add -A || echo "git add failed in $dir"
@@ -347,6 +347,8 @@ _pre_command_git_check() {
   type=$(type -t -- "${cmd_and_args[0]}")
   # do our check
   _git_commit_if_dirty "$PREV_CMD" 1
+  # special case, if there is a pipe
+  
 
   if [[ $type == file || $type == alias ]]; then
     echo "Running command under strace: $PREV_CMD"
@@ -375,6 +377,3 @@ _post_command_git_check() {
 
 trap 'PREV_CMD=$BASH_COMMAND; _pre_command_git_check' DEBUG
 PROMPT_COMMAND='_post_command_git_check'
-
-
-
