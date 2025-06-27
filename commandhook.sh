@@ -7,6 +7,9 @@ shopt -s extdebug
 GITCHECK_DIRS="$HOME/.scimon/.autogitcheck"
 STRACE_LOG_DIR="$HOME/.scimon/strace.log"
 
+# Variables
+IS_PIPE_IN_PROGRESS=0
+
 #-------- database operations --------
 
 # TODO: aknowledge reprozip by using their license? Since I am using their database schema
@@ -331,7 +334,8 @@ _pre_command_git_check() {
     _post_command_git_check*   |   \
     trap\ -*       |   \
     __vsc_*        | \
-    source*) 
+    source* | \
+    strace*) 
       return 0
       ;;
   esac
@@ -353,12 +357,13 @@ _pre_command_git_check() {
   _git_commit_if_dirty "$PREV_CMD" 1
 
   # handle pipes
+  # if i close a terminal with a pipe command, its gonna run pipe cmd on startup 
   local full_cmd=$(history 1 | sed -E 's/^[[:space:]]*[0-9]+[[:space:]]*//')
   # echo "command to be executed: $full_cmd"
-  if [[ "$full_cmd" == *"|"* ]]; then
-    echo "Running *pipe* command under strace: $full_cmd"
+  if [[ "$full_cmd" == *"|"*  && ! $IS_PIPE_IN_PROGRESS ]]; then
+    echo "Running pipe command under strace"
+    IS_PIPE_IN_PROGRESS=1
     strace -f -e trace=openat,openat2,open,creat,access,faccessat,faccessat2,statx,stat,lstat,fstat,readlink,readlinkat,rename,renameat,renameat2,link,linkat,symlink,symlinkat,mkdir,mkdirat,execve,execveat,fork,vfork,clone,clone3,connect,accept,accept4,fchownat,fchmodat -o $STRACE_LOG_DIR -- bash -c "$full_cmd"
-    # don't reinstall DEBUG hook until everything finishes execution (post command will handle that)
     return 1
   fi
   # normal case
@@ -383,6 +388,7 @@ _post_command_git_check() {
 
   # use the same $PREV_CMD we saved in the DEBUG hook
   _git_commit_if_dirty "$PREV_CMD" 0
+  IS_PIPE_IN_PROGRESS=0
   trap '_pre_command_git_check' DEBUG
 }
 
