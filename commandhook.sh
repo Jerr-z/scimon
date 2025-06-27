@@ -393,5 +393,10 @@ _post_command_git_check() {
   trap '_pre_command_git_check' DEBUG
 }
 
-trap '_pre_command_git_check' DEBUG
-PROMPT_COMMAND='_post_command_git_check'
+_init_hook() {
+  PROMPT_COMMAND='_post_command_git_check'
+  trap '_pre_command_git_check' DEBUG
+}
+
+PROMPT_COMMAND='_init_hook'
+
