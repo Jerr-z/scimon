@@ -8,8 +8,7 @@ GITCHECK_DIRS="$HOME/.scimon/.autogitcheck"
 STRACE_LOG_DIR="$HOME/.scimon/strace.log"
 
 # Variables
-IS_PIPE_IN_PROGRESS=0
-
+IS_PIPE_IN_PROGRESS=1 # setting it to 1 to take care of the case when history 1 on shell startup is a pipe
 #-------- database operations --------
 
 # TODO: aknowledge reprozip by using their license? Since I am using their database schema
@@ -297,7 +296,7 @@ _git_commit_if_dirty() {
 
         # when we are doing pre-command git check and see dirty files, simply commit. No need to add a command into the db.
         if (( ! is_pre_command )); then
-          _insert_command "$(git rev-parse HEAD)" "" "$(history 1 | sed -E 's/^[[:space:]]*[0-9]+[[:space:]]*//')"
+          _insert_command "$(git rev-parse HEAD)" "" "$msg"
         fi
 
         dirty_files=$(git status --porcelain --untracked-files=all | awk '{print $2}');
@@ -327,6 +326,7 @@ _pre_command_git_check() {
   fi
 
   # skips autocompletion commands, traps, and VSCode commands
+  [[ -n $VSCODE_SHELL_INTEGRATION || -n $VSCODE_INJECTION ]] && return 0
   [[ -n ${COMP_LINE-} ]] && return 0
   [[ -n ${COMP_POINT-} ]] && return 0
   # Is source skippable?
@@ -342,33 +342,34 @@ _pre_command_git_check() {
   # turn off the DEBUG trap so nothing inside re-triggers us
   # DO NOT PUT ANY HOOK LOGIC ABOVE THIS SINCE IT WILL TRIGGER RECURSION
   trap - DEBUG
-  # just curious
   
-  # capture what command is about to run
-  PREV_CMD="$BASH_COMMAND"
 
   local cmd_and_args=()
   # split the command into an array to handle cases with spaces
-  read -r -a cmd_and_args <<< "$PREV_CMD"
+  read -r -a cmd_and_args <<< "$BASH_COMMAND"
 
   local type
   type=$(type -t -- "${cmd_and_args[0]}")
-  # do our check
-  _git_commit_if_dirty "$PREV_CMD" 1
-
-  # handle pipes
-  # if i close a terminal with a pipe command, its gonna run pipe cmd on startup 
   local full_cmd=$(history 1 | sed -E 's/^[[:space:]]*[0-9]+[[:space:]]*//')
-  # echo "command to be executed: $full_cmd"
-  if [[ "$full_cmd" == *"|"*  && ! $IS_PIPE_IN_PROGRESS ]]; then
+  local history_count=$(history 1 | awk '{print $1}')
+  # do our check
+  _git_commit_if_dirty "$full_cmd" 1
+  echo "command to be executed: $BASH_COMMAND"
+  # echo $IS_PIPE_IN_PROGRESS
+  # handle pipes
+  if [[ "$full_cmd" == *"|"*  && $IS_PIPE_IN_PROGRESS -eq 0 ]]; then
     echo "Running pipe command under strace"
     IS_PIPE_IN_PROGRESS=1
     strace -f -e trace=openat,openat2,open,creat,access,faccessat,faccessat2,statx,stat,lstat,fstat,readlink,readlinkat,rename,renameat,renameat2,link,linkat,symlink,symlinkat,mkdir,mkdirat,execve,execveat,fork,vfork,clone,clone3,connect,accept,accept4,fchownat,fchmodat -o $STRACE_LOG_DIR -- bash -c "$full_cmd"
+    trap '_pre_command_git_check' DEBUG
+    return 1
+  elif [[ "$full_cmd" == *"|"*  && $IS_PIPE_IN_PROGRESS -eq 1 ]]; then
+    echo "skipping the debug trap invocation on a pipe command that is in progress"
     return 1
   fi
   # normal case
   if [[ $type == file || $type == alias ]]; then
-    echo "Running command under strace: $PREV_CMD"
+    echo "Running command under strace: $BASH_COMMAND"
     strace -f -e trace=openat,openat2,open,creat,access,faccessat,faccessat2,statx,stat,lstat,fstat,readlink,readlinkat,rename,renameat,renameat2,link,linkat,symlink,symlinkat,mkdir,mkdirat,execve,execveat,fork,vfork,clone,clone3,connect,accept,accept4,fchownat,fchmodat -o $STRACE_LOG_DIR -- "${cmd_and_args[@]}" 
     # TODO: Maybe flush out the strace log 
 
@@ -379,19 +380,18 @@ _pre_command_git_check() {
   fi
   # re-install the DEBUG hook for next time
   trap '_pre_command_git_check' DEBUG
+  PROMPT_COMMAND='_post_command_git_check'
 }
 
 # After each user command
 _post_command_git_check() {
   # again, disable DEBUG so we don't recurse when we cd/git inside here
   trap - DEBUG
-
-  # use the same $PREV_CMD we saved in the DEBUG hook
-  _git_commit_if_dirty "$PREV_CMD" 0
+  local full_cmd=$(history 1 | sed -E 's/^[[:space:]]*[0-9]+[[:space:]]*//')
+  _git_commit_if_dirty "$full_cmd" 0
   IS_PIPE_IN_PROGRESS=0
   trap '_pre_command_git_check' DEBUG
 }
 
-
-trap 'PREV_CMD=$BASH_COMMAND; _pre_command_git_check' DEBUG
+trap '_pre_command_git_check' DEBUG
 PROMPT_COMMAND='_post_command_git_check'
