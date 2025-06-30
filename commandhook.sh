@@ -347,7 +347,6 @@ _pre_command_git_check() {
   local cmd_and_args=()
   # split the command into an array to handle cases with spaces
   read -r -a cmd_and_args <<< "$BASH_COMMAND"
-
   local type
   type=$(type -t -- "${cmd_and_args[0]}")
   local full_cmd=$(history 1 | sed -E 's/^[[:space:]]*[0-9]+[[:space:]]*//')
@@ -357,7 +356,7 @@ _pre_command_git_check() {
   echo "command to be executed: $BASH_COMMAND"
   # echo $IS_PIPE_IN_PROGRESS
   # handle pipes
-  if [[ "$full_cmd" == *"|"*  && $IS_PIPE_IN_PROGRESS -eq 0 ]]; then
+  if [[ ("$full_cmd" == *"|"* || "$full_cmd" == *">"*)  && $IS_PIPE_IN_PROGRESS -eq 0 ]]; then
     echo "Running pipe command under strace"
     IS_PIPE_IN_PROGRESS=1
     strace -f -e trace=openat,openat2,open,creat,access,faccessat,faccessat2,statx,stat,lstat,fstat,readlink,readlinkat,rename,renameat,renameat2,link,linkat,symlink,symlinkat,mkdir,mkdirat,execve,execveat,fork,vfork,clone,clone3,connect,accept,accept4,fchownat,fchmodat -o $STRACE_LOG_DIR -- bash -c "$full_cmd"
