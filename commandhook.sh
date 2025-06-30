@@ -39,7 +39,8 @@ CREATE TABLE IF NOT EXISTS processes (
     commit_hash TEXT NOT NULL,
     parent_pid INTEGER,
     child_pid INTEGER,
-    timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    syscall TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_processes_git_hash on processes(commit_hash);
 CREATE TABLE IF NOT EXISTS opened_files (
@@ -49,7 +50,8 @@ CREATE TABLE IF NOT EXISTS opened_files (
     timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     mode INTEGER NOT NULL,
     is_directory BOOLEAN NOT NULL,
-    pid INTEGER NOT NULL
+    pid INTEGER NOT NULL,
+    syscall TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_opened_files_git_hash on opened_files(commit_hash);
 CREATE TABLE IF NOT EXISTS executed_files (
@@ -60,7 +62,8 @@ CREATE TABLE IF NOT EXISTS executed_files (
     pid INTEGER NOT NULL,
     argv TEXT NOT NULL,
     envp TEXT NOT NULL,
-    workingdir TEXT NOT NULL
+    workingdir TEXT NOT NULL,
+    syscall TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_executed_files_git_hash on executed_files(commit_hash);
 '
@@ -111,14 +114,15 @@ _insert_process() {
   local pid="$1"
   local commit="$2"
   local child_pid="$3"
+  local syscall="$4"
 
   local parent_pid=$(sqlite3 .db "SELECT pid FROM processes WHERE child_pid='$pid' AND commit_hash='$commit'")
   if [[ -z "$parent_pid" ]]; then
     parent_pid="NULL"
   fi
   sqlite3 .db \
-  "INSERT INTO processes (pid, commit_hash, parent_pid, child_pid) \
-    VALUES ($pid, '$commit', $parent_pid, $child_pid);"
+  "INSERT INTO processes (pid, commit_hash, parent_pid, child_pid, syscall) \
+    VALUES ($pid, '$commit', $parent_pid, $child_pid, '$syscall');"
 }
 
 
@@ -128,10 +132,11 @@ _insert_opened_file() {
   local mode="$3"
   local is_directory="$4"
   local pid="$5"
+  local syscall="$6"
 
   sqlite3 .db \
-  "INSERT INTO opened_files (commit_hash, filename, mode, is_directory, pid) \
-    VALUES ('$commit', '$filename', $mode, $is_directory, $pid);"
+  "INSERT INTO opened_files (commit_hash, filename, mode, is_directory, pid, syscall) \
+    VALUES ('$commit', '$filename', $mode, $is_directory, $pid, '$syscall');"
 }
 
 
@@ -142,10 +147,11 @@ _insert_executed_file() {
   local argv="$4"
   local envp="$5"
   local workingdir="$6"
+  local syscall="$7"
 
   sqlite3 .db \
-  "INSERT INTO executed_files (filename, commit_hash, pid, argv, envp, workingdir) \
-    VALUES ('$filename', '$commit', $pid, '$argv', '$envp', '$workingdir');"
+  "INSERT INTO executed_files (filename, commit_hash, pid, argv, envp, workingdir, syscall) \
+    VALUES ('$filename', '$commit', $pid, '$argv', '$envp', '$workingdir', '$syscall');"
 }
 
 # ---------------- strace parsing ----------------
@@ -193,7 +199,7 @@ _handle_processes() {
   local retval="$4"
 
   # i think its fine to call git directly cuz parent function should be invoked in the proper git directory
-  _insert_process "$pid" "$(git rev-parse HEAD)" "$retval"
+  _insert_process "$pid" "$(git rev-parse HEAD)" "$retval" "$syscall"
 }
 
 _handle_file_open() {
@@ -215,7 +221,7 @@ _handle_file_open() {
   [[ -d "$filename" ]] && is_dir=1 || is_dir=0
 
   # store into db
-  _insert_opened_file "$(git rev-parse HEAD)" "$filename" "$mode" "$is_dir" "$pid"
+  _insert_opened_file "$(git rev-parse HEAD)" "$filename" "$mode" "$is_dir" "$pid" "$syscall"
 }
 
 _handle_file_execute() {
@@ -257,7 +263,7 @@ _handle_file_execute() {
   
   # echo "Exec: PID: $pid, filename: $filename, argv: $argv, envp: $envp, retval: $retval"
 
-  _insert_executed_file "$filename" "$(git rev-parse HEAD)" "$pid" "$argv" "$envp" "$workingdir"
+  _insert_executed_file "$filename" "$(git rev-parse HEAD)" "$pid" "$argv" "$envp" "$workingdir" "$syscall"
 }
 
 
