@@ -3,26 +3,79 @@ import subprocess
 from typing import Optional
 from models import Graph
 from db import *
-
+from utils import is_file_tracked_by_git, is_git_hash_on_file
 
 
 def generate_graph(filename: str, git_hash: Optional[str]) -> Graph:
     '''
-    Produce a provenance graph for a given file at a version <= the given githash, 
+    Produce a provenance graph for a given file at a version of the given githash, 
     if no githash is provided default to latest version
     '''
+    
+    # Check if the file exists in the git repository
+    if not is_file_tracked_by_git(filename=filename):
+        print(f"Error: {filename} is not being tracked by the git repository")
+        return
+    
+    # Check if the git hash exists on this file change list
+    if not is_git_hash_on_file(filename, git_hash):
+        print(f"Error: the provided git commit hash does not have any changes related to the file {filename}")
+        return
+    
+    # Initialize
     graph = Graph()
     db = get_db()
-    # if not git_hash: 
-    #     git_hash = subprocess.check_output(
-    #         ["git", "rev-parse", "HEAD"],
-    #         text=True
-    #     ).strip()
+    if not git_hash: 
+        git_hash = subprocess.check_output(
+            ["git", "rev-parse", "HEAD"],
+            text=True
+        ).strip()
 
     processes_trace = get_processes_trace(git_hash, db)
     open_files_trace = get_opened_files_trace(git_hash, db)
     executed_files_trace = get_executed_files_trace(git_hash, db)
-    yield
+
+    # create nodes and edges for the graph
+    for pt in processes_trace:
+        parent_pid, pid, child_pid, syscall = pt
+
+        parent_process_node = Process(git_hash=git_hash, pid=parent_pid, parent_pid=None, child_pid=pid)
+        process_node = Process(git_hash=git_hash, pid=pid, parent_pid=parent_pid, child_pid=child_pid)
+        child_process_node = Process(git_hash=git_hash, pid=child_pid, parent_pid=pid, child_pid=None)
+        parent_edge = Edge(parent_process_node, process_node, syscall)
+        child_edge = Edge(process_node, child_process_node, syscall)
+
+        graph.add_node(parent_process_node)
+        graph.add_node(process_node)
+        graph.add_node(child_process_node)
+        graph.add_edge(parent_edge)
+        graph.add_edge(child_edge)
+            
+
+    for oft in open_files_trace:
+        pid, filename, syscall = oft
+        
+        file_node = File(git_hash, filename)
+        process_node = Process(git_hash=git_hash, pid=pid)
+        process_to_file_edge = Edge(process_node, file_node, syscall)
+
+        graph.add_node(file_node)
+        graph.add_node(process_node)
+        graph.add_edge(process_to_file_edge)
+
+
+    for eft in executed_files_trace:
+        pid, filename, syscall = eft
+        
+        file_node = File(git_hash, filename)
+        process_node = Process(git_hash=git_hash, pid=pid)
+        process_to_file_edge = Edge(process_node, file_node, syscall)
+
+        graph.add_node(file_node)
+        graph.add_node(process_node)
+        graph.add_edge(process_to_file_edge)
+
+    return graph
 
 
 def reproduce(file: str, git_hash: Optional[str]):

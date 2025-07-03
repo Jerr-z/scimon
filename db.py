@@ -31,6 +31,3 @@ def get_executed_files_trace(commit_hash: str, db: sqlite3.Connection) -> List[T
     cursor.execute(executed_files_sql, (commit_hash,))
     # TODO: implement filtering logic so only the files within the monitored projects directory is recorded
     return cursor.fetchall()
-
-
-

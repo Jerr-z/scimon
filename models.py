@@ -1,24 +1,23 @@
 from typing import Optional, Set
 
 class Node(object):
-    def __init__(self, git_hash: Optional[str]):
+    def __init__(self, git_hash: str):
         self.git_hash = git_hash
 
 class Process(Node):
-    def __init__(self, git_hash: Optional[str], pid: int, parent_pid: Optional[int], child_pid: Optional[int]):
+    def __init__(self, git_hash: str, pid: int, parent_pid: Optional[int], child_pid: Optional[int]):
         super.__init__(git_hash)
         self.pid = pid
-        self.parent = parent_pid
-        self.child = child_pid
-    
+        self.parent_pid = parent_pid
+        self.child_pid = child_pid
     def __eq__(self, other):
-        return isinstance(other, Process) and self.git_hash == other.git_hash and self.pid == other.pid and self.parent == other.parent and self.child == other.child
+        return isinstance(other, Process) and self.git_hash == other.git_hash and self.pid == other.pid
     
     def __hash__(self):
         return hash(self.git_hash, self.pid, self.parent, self.child)
 
 class File(Node):
-    def __init__(self, git_hash: Optional[str], filename: str):
+    def __init__(self, git_hash: str, filename: str):
         super.__init__(git_hash)
         self.filename = filename
 
@@ -45,17 +44,40 @@ class Graph(object):
     def __init__(self, nodes: Optional[Set[Node]], edges: Optional[Set[Edge]]):
         self.nodes = set() if not nodes else nodes
         self.edges = set() if not edges else edges
-        self.adj = {}
-        for e in self.edges:
-            if e.in_node not in self.adj:
-                self.adj[e.in_node] = []
-            self.adj[e.in_node].append(e.out_node)
+        
 
     def add_node(self, node: Node) -> None:
-        pass
+        '''Adds the provided node into the collection of nodes in the graph, if it already exists then perform update if possible'''
+        if node not in self.nodes:
+            self.nodes.add(node)
+        else:
+            # perform an update if the current supplied Process has more information
+            node_in_set = next(iter(self.nodes & {node}))
+            if node_in_set and isinstance(node_in_set, Process) and isinstance(node, Process):
+                if not node_in_set.parent_pid and node.parent_pid:
+                    node_in_set.parent_pid = node.parent_pid
+                if not node_in_set.child_pid and node.child_pid:
+                    node_in_set.child_pid = node.child_pid
+    
 
     def add_edge(self, edge: Edge) -> None:
-        pass
+        '''
+        Adds the provided edge into the collection of edges in the graph
+        If one of in-node or out-node is not part of the graph, we add it into the graph as well
+        '''
+        
+        self.add_node(edge.in_node)
+        
+        self.add_node(edge.out_node)
+        
+        self.edges.add(edge)
+
+
     def generate_dot(self):
+        '''
+        Generates a dot file for this graph?
+        '''
+        # TODO
         pass
+    
 
