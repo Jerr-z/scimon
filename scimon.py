@@ -6,6 +6,49 @@ from db import *
 from utils import is_file_tracked_by_git, is_git_hash_on_file
 
 
+def get_trace_data(git_hash: str, db) -> Tuple[list, list, list]:
+    """Retrieve all trace data for a given git hash."""
+    processes_trace = get_processes_trace(git_hash, db)
+    open_files_trace = get_opened_files_trace(git_hash, db)
+    executed_files_trace = get_executed_files_trace(git_hash, db)
+    return processes_trace, open_files_trace, executed_files_trace
+
+
+def build_process_nodes_and_edges(graph: Graph, processes_trace: list, git_hash: str):
+    """Build process nodes and their relationships in the graph."""
+    for pt in processes_trace:
+        parent_pid, pid, child_pid, syscall = pt
+
+        parent_process_node = Process(git_hash=git_hash, pid=parent_pid, parent_pid=None, child_pid=pid)
+        process_node = Process(git_hash=git_hash, pid=pid, parent_pid=parent_pid, child_pid=child_pid)
+        child_process_node = Process(git_hash=git_hash, pid=child_pid, parent_pid=pid, child_pid=None)
+        
+        parent_edge = Edge(parent_process_node, process_node, syscall)
+        child_edge = Edge(process_node, child_process_node, syscall)
+
+        graph.add_node(parent_process_node)
+        graph.add_node(process_node)
+        graph.add_node(child_process_node)
+        graph.add_edge(parent_edge)
+        graph.add_edge(child_edge)
+
+
+def build_file_access_nodes_and_edges(graph: Graph, file_traces: list, git_hash: str, is_execution: bool = False):
+    """Build file nodes and their relationships to processes."""
+    for trace in file_traces:
+        pid, filename, syscall = trace
+        
+        file_node = File(git_hash, filename)
+        process_node = Process(git_hash=git_hash, pid=pid)
+        process_to_file_edge = Edge(process_node, file_node, syscall)
+
+        graph.add_node(file_node)
+        graph.add_node(process_node)
+        graph.add_edge(process_to_file_edge)
+
+
+
+
 def generate_graph(filename: str, git_hash: Optional[str]) -> Graph:
     '''
     Produce a provenance graph for a given file at a version of the given githash, 
@@ -31,49 +74,11 @@ def generate_graph(filename: str, git_hash: Optional[str]) -> Graph:
             text=True
         ).strip()
 
-    processes_trace = get_processes_trace(git_hash, db)
-    open_files_trace = get_opened_files_trace(git_hash, db)
-    executed_files_trace = get_executed_files_trace(git_hash, db)
+    processes_trace, open_files_trace, executed_files_trace = get_trace_data(git_hash, db)
 
-    # create nodes and edges for the graph
-    for pt in processes_trace:
-        parent_pid, pid, child_pid, syscall = pt
-
-        parent_process_node = Process(git_hash=git_hash, pid=parent_pid, parent_pid=None, child_pid=pid)
-        process_node = Process(git_hash=git_hash, pid=pid, parent_pid=parent_pid, child_pid=child_pid)
-        child_process_node = Process(git_hash=git_hash, pid=child_pid, parent_pid=pid, child_pid=None)
-        parent_edge = Edge(parent_process_node, process_node, syscall)
-        child_edge = Edge(process_node, child_process_node, syscall)
-
-        graph.add_node(parent_process_node)
-        graph.add_node(process_node)
-        graph.add_node(child_process_node)
-        graph.add_edge(parent_edge)
-        graph.add_edge(child_edge)
-            
-
-    for oft in open_files_trace:
-        pid, filename, syscall = oft
-        
-        file_node = File(git_hash, filename)
-        process_node = Process(git_hash=git_hash, pid=pid)
-        process_to_file_edge = Edge(process_node, file_node, syscall)
-
-        graph.add_node(file_node)
-        graph.add_node(process_node)
-        graph.add_edge(process_to_file_edge)
-
-
-    for eft in executed_files_trace:
-        pid, filename, syscall = eft
-        
-        file_node = File(git_hash, filename)
-        process_node = Process(git_hash=git_hash, pid=pid)
-        process_to_file_edge = Edge(process_node, file_node, syscall)
-
-        graph.add_node(file_node)
-        graph.add_node(process_node)
-        graph.add_edge(process_to_file_edge)
+    build_process_nodes_and_edges(graph, processes_trace, git_hash)
+    build_file_access_nodes_and_edges(graph, open_files_trace, git_hash)
+    build_file_access_nodes_and_edges(graph, executed_files_trace, git_hash)
 
     return graph
 
