@@ -42,11 +42,20 @@ class Edge(object):
 
 class Graph(object):
 
-    def __init__(self, nodes: Set[Node], edges: Set[Edge]):
-        self.nodes = nodes
-        self.edges = edges
-        # create adjacency list?
+    def __init__(self, nodes: Optional[Set[Node]], edges: Optional[Set[Edge]]):
+        self.nodes = set() if not nodes else nodes
+        self.edges = set() if not edges else edges
+        self.adj = {}
+        for e in self.edges:
+            if e.in_node not in self.adj:
+                self.adj[e.in_node] = []
+            self.adj[e.in_node].append(e.out_node)
 
+    def add_node(self, node: Node) -> None:
+        pass
+
+    def add_edge(self, edge: Edge) -> None:
+        pass
     def generate_dot(self):
         pass
 
