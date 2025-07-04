@@ -6,6 +6,7 @@ DB_NAME=".db"
 
 def get_db() -> sqlite3.Connection:
     con = sqlite3.connect(DB_NAME)
+    print("Database connection acquired")
     return con
 
 def get_processes_trace(commit_hash: str, db: sqlite3.Connection) -> List[Tuple]:

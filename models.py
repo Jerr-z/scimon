@@ -1,12 +1,13 @@
 from typing import Optional, Set
+import graphviz
 
 class Node(object):
     def __init__(self, git_hash: str):
         self.git_hash = git_hash
 
 class Process(Node):
-    def __init__(self, git_hash: str, pid: int, parent_pid: Optional[int], child_pid: Optional[int]):
-        super.__init__(git_hash)
+    def __init__(self, git_hash: str, pid: int, parent_pid: Optional[int] = None, child_pid: Optional[int] = None):
+        super().__init__(git_hash)
         self.pid = pid
         self.parent_pid = parent_pid
         self.child_pid = child_pid
@@ -14,18 +15,18 @@ class Process(Node):
         return isinstance(other, Process) and self.git_hash == other.git_hash and self.pid == other.pid
     
     def __hash__(self):
-        return hash(self.git_hash, self.pid, self.parent, self.child)
+        return hash((self.git_hash, self.pid))
 
 class File(Node):
     def __init__(self, git_hash: str, filename: str):
-        super.__init__(git_hash)
+        super().__init__(git_hash)
         self.filename = filename
 
     def __eq__(self, other):
         return isinstance(other, File) and self.git_hash == other.git_hash and self.filename == other.filename
     
     def __hash__(self):
-        return hash(self.git_hash, self.filename)
+        return hash((self.git_hash, self.filename))
     
 class Edge(object):
     def __init__(self, in_node: Node, out_node: Node, syscall: str):
@@ -37,11 +38,11 @@ class Edge(object):
         return isinstance(other, Edge) and self.in_node == other.in_node and self.out_node == other.out_node and self.syscall == other.syscall
     
     def __hash__(self):
-        return hash(self.in_node, self.out_node, self.syscall)
+        return hash((self.in_node, self.out_node, self.syscall))
 
 class Graph(object):
 
-    def __init__(self, nodes: Optional[Set[Node]], edges: Optional[Set[Edge]]):
+    def __init__(self, nodes: Optional[Set[Node]] = None, edges: Optional[Set[Edge]] = None):
         self.nodes = set() if not nodes else nodes
         self.edges = set() if not edges else edges
         
@@ -77,7 +78,29 @@ class Graph(object):
         '''
         Generates a dot file for this graph?
         '''
-        # TODO
-        pass
+        dot = graphviz.Digraph()
+
+        for n in self.nodes:
+            if isinstance(n, Process):
+                # Convert all attributes to strings and handle None values
+                attrs = {
+                    'label': str(n.pid),
+                    'git_hash': str(n.git_hash),
+                    'parent_pid': str(n.parent_pid) if n.parent_pid is not None else "",
+                    'child_pid': str(n.child_pid) if n.child_pid is not None else ""
+                }
+                print(f"Node Added: {n.pid, n.git_hash}")
+                dot.node(str(n.pid), **attrs)
+            elif isinstance(n, File):
+                print(f"Node Added: {n.filename, n.git_hash}")
+                dot.node(n.filename, n.filename, git_hash=str(n.git_hash))
+
+        for e in self.edges:
+            in_node_name = str(e.in_node.pid) if isinstance(e.in_node, Process) else e.in_node.filename
+            out_node_name = str(e.out_node.pid) if isinstance(e.out_node, Process) else e.out_node.filename
+            print(f"Edge Added: {in_node_name, out_node_name, e.syscall}")
+            dot.edge(in_node_name, out_node_name, e.syscall)
+        
+        dot.render("prov", format='png', cleanup=True)
     
 
