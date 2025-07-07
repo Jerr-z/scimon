@@ -18,11 +18,10 @@ def get_processes_trace(commit_hash: str, db: sqlite3.Connection) -> List[Tuple]
 
 
 def get_opened_files_trace(commit_hash: str, db: sqlite3.Connection) -> List[Tuple]:
-    '''Returns a list of (pid, filename, syscall) for a given commit hash'''
+    '''Returns a list of (pid, filename, syscall, mode) for a given commit hash'''
     cursor = db.cursor()
-    opened_files_sql = '''SELECT DISTINCT pid, filename, syscall FROM opened_files WHERE commit_hash = ?'''
+    opened_files_sql = '''SELECT DISTINCT pid, filename, syscall, mode FROM opened_files WHERE commit_hash = ?'''
     cursor.execute(opened_files_sql, (commit_hash,))
-    # TODO: implement filtering logic so only the files within the monitored projects directory is recorded
     return cursor.fetchall()
 
 def get_executed_files_trace(commit_hash: str, db: sqlite3.Connection) -> List[Tuple]:
@@ -30,5 +29,4 @@ def get_executed_files_trace(commit_hash: str, db: sqlite3.Connection) -> List[T
     cursor = db.cursor()
     executed_files_sql = '''SELECT pid, filename, syscall FROM executed_files WHERE commit_hash = ?'''
     cursor.execute(executed_files_sql, (commit_hash,))
-    # TODO: implement filtering logic so only the files within the monitored projects directory is recorded
     return cursor.fetchall()
