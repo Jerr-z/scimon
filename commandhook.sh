@@ -51,7 +51,8 @@ CREATE TABLE IF NOT EXISTS opened_files (
     mode INTEGER NOT NULL,
     is_directory BOOLEAN NOT NULL,
     pid INTEGER NOT NULL,
-    syscall TEXT NOT NULL
+    syscall TEXT NOT NULL,
+    open_flag TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_opened_files_git_hash on opened_files(commit_hash);
 CREATE TABLE IF NOT EXISTS executed_files (
@@ -133,10 +134,11 @@ _insert_opened_file() {
   local is_directory="$4"
   local pid="$5"
   local syscall="$6"
+  local open_flag="$7"
 
   sqlite3 .db \
-  "INSERT INTO opened_files (commit_hash, filename, mode, is_directory, pid, syscall) \
-    VALUES ('$commit', '$filename', $mode, $is_directory, $pid, '$syscall');"
+  "INSERT INTO opened_files (commit_hash, filename, mode, is_directory, pid, syscall, open_flag) \
+    VALUES ('$commit', '$filename', $mode, $is_directory, $pid, '$syscall', '$open_flag');"
 }
 
 
@@ -191,6 +193,16 @@ _parse_strace() {
 
 }
 
+_is_file_tracked_by_git() {
+  local filename="$1"
+
+  if git ls-files --error-unmatch "$filename" &>/dev/null; then
+    return 0
+  fi
+
+  return 1
+}
+
 _handle_processes() {
   # store the system calls into the processes table
   local pid="$1"
@@ -213,6 +225,23 @@ _handle_file_open() {
   local filename=$(printf '%s' "$args" | sed -E 's/.*"([^"]+)".*/\1/')
   local mode=-1
   local is_dir
+  local open_flag=""
+
+  if ! _is_file_tracked_by_git "$filename"; then
+    return 0
+  fi
+
+  if [[ "$syscall" == "open" ]]; then
+    if [[ "$args" =~ \"[^\"]+\",[[:space:]]*([^,\)]+) ]]; then
+      open_flag="${BASH_REMATCH[1]}"
+    fi
+  elif [[ "$syscall" == "openat" || "$syscall" == "openat2" ]]; then
+    if [[ "$args" =~ \"[^\"]+\",[[:space:]]*([^,\)]+) ]]; then
+      open_flag="${BASH_REMATCH[1]}"
+    fi
+  fi
+
+
   if [[ "$args" =~ ,[[:space:]]*([0-7]{3,4}) ]]; then
     mode="${BASH_REMATCH[1]}"
   fi
@@ -221,7 +250,7 @@ _handle_file_open() {
   [[ -d "$filename" ]] && is_dir=1 || is_dir=0
 
   # store into db
-  _insert_opened_file "$(git rev-parse HEAD)" "$filename" "$mode" "$is_dir" "$pid" "$syscall"
+  _insert_opened_file "$(git rev-parse HEAD)" "$filename" "$mode" "$is_dir" "$pid" "$syscall" "$open_flag"
 }
 
 _handle_file_execute() {
@@ -230,39 +259,42 @@ _handle_file_execute() {
   local syscall="$2"
   local args="$3"
   local retval="$4"
+  local workingdir="$(pwd)"
+  local filename=""
+  if [[ "$args" =~ \"([^\"]+)\" ]]; then
+    filename="${BASH_REMATCH[1]}"
+  fi
   
   if [[ "$syscall" == "execve" ]]; then
-    # Expected format:
-    # "filename", [argv], envp (which may include comments)
-    local regex='^"([^"]+)",[[:space:]]*(\[[^]]+\]),[[:space:]]*(.+)$'
-    if [[ $args =~ $regex ]]; then
-      local filename="${BASH_REMATCH[1]}"
-      local argv="${BASH_REMATCH[2]}"
-      local envp="${BASH_REMATCH[3]}"
+    # Get everything between the first [ and the following ],
+    if [[ "$args" =~ \"[^\"]+\",[[:space:]]*(\[.*\]),[[:space:]]* ]]; then
+      local argv="${BASH_REMATCH[1]}"
     else
-      echo "Failed to parse execve args: $args"
+      echo "Failed to extract argv from: $args"
       return 1
     fi
   elif [[ "$syscall" == "execveat" ]]; then
-    # Expected format for execveat:
-    # AT_FDCWD, "filename", [argv], [envp], flag
-    # We ignore the first parameter and the last flag.
-    local regex='^[^,]+,\s*"([^"]+)",\s*(\[[^]]+\]),\s*(\[[^]]+\])'
-    if [[ $args =~ $regex ]]; then
-      local filename="${BASH_REMATCH[1]}"
-      local argv="${BASH_REMATCH[2]}"
-      local envp="${BASH_REMATCH[3]}"
+    # Handle execveat format
+    if [[ "$args" =~ [^,]+,[[:space:]]*\"[^\"]+\",[[:space:]]*(\[.*\]),[[:space:]]* ]]; then
+      local argv="${BASH_REMATCH[1]}"
     else
-      echo "Failed to parse execveat args: $args"
+      echo "Failed to extract argv from execveat: $args"
       return 1
     fi
   fi
+
+  if [[ "$args" =~ (\[.*\]),[[:space:]]*(.*) ]]; then
+    local envp="${BASH_REMATCH[2]}"
+  else
+    echo "Failed to extract envp from: $args"
+    local envp="(unknown environment)"
+  fi
+
   argv="${argv//\'/\'\'}"
   # remove trailing comments from envp
   envp=$(echo "$envp" | sed -E 's/[[:space:]]*\/\*.*\*\/[[:space:]]*$//')
   
   # echo "Exec: PID: $pid, filename: $filename, argv: $argv, envp: $envp, retval: $retval"
-
   _insert_executed_file "$filename" "$(git rev-parse HEAD)" "$pid" "$argv" "$envp" "$workingdir" "$syscall"
 }
 
