@@ -6,11 +6,9 @@ class Node(object):
         self.git_hash = git_hash
 
 class Process(Node):
-    def __init__(self, git_hash: str, pid: int, parent_pid: Optional[int] = None, child_pid: Optional[int] = None):
+    def __init__(self, git_hash: str, pid: int):
         super().__init__(git_hash)
         self.pid = pid
-        self.parent_pid = parent_pid
-        self.child_pid = child_pid
     def __eq__(self, other):
         return isinstance(other, Process) and self.git_hash == other.git_hash and self.pid == other.pid
     
@@ -51,16 +49,7 @@ class Graph(object):
         '''Adds the provided node into the collection of nodes in the graph, if it already exists then perform update if possible'''
         if node not in self.nodes:
             self.nodes.add(node)
-        else:
-            # perform an update if the current supplied Process has more information
-            node_in_set = next(iter(self.nodes & {node}))
-            if node_in_set and isinstance(node_in_set, Process) and isinstance(node, Process):
-                if not node_in_set.parent_pid and node.parent_pid:
-                    node_in_set.parent_pid = node.parent_pid
-                if not node_in_set.child_pid and node.child_pid:
-                    node_in_set.child_pid = node.child_pid
     
-
     def add_edge(self, edge: Edge) -> None:
         '''
         Adds the provided edge into the collection of edges in the graph
@@ -85,9 +74,7 @@ class Graph(object):
                 # Convert all attributes to strings and handle None values
                 attrs = {
                     'label': str(n.pid),
-                    'git_hash': str(n.git_hash),
-                    'parent_pid': str(n.parent_pid) if n.parent_pid is not None else "",
-                    'child_pid': str(n.child_pid) if n.child_pid is not None else ""
+                    'git_hash': str(n.git_hash)
                 }
                 print(f"Node Added: {n.pid, n.git_hash}")
                 dot.node(str(n.pid), **attrs)

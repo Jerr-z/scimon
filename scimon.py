@@ -18,12 +18,13 @@ def get_trace_data(git_hash: str, db) -> Tuple[list, list, list]:
 def build_process_nodes_and_edges(graph: Graph, processes_trace: list, git_hash: str):
     """Build process nodes and their relationships in the graph."""
     print("Building process nodes and edges")
+    return
     for pt in processes_trace:
         parent_pid, pid, child_pid, syscall = pt
 
-        parent_process_node = Process(git_hash=git_hash, pid=parent_pid, parent_pid=None, child_pid=pid)
-        process_node = Process(git_hash=git_hash, pid=pid, parent_pid=parent_pid, child_pid=child_pid)
-        child_process_node = Process(git_hash=git_hash, pid=child_pid, parent_pid=pid, child_pid=None)
+        parent_process_node = Process(git_hash=git_hash, pid=parent_pid)
+        process_node = Process(git_hash=git_hash, pid=pid)
+        child_process_node = Process(git_hash=git_hash, pid=child_pid)
         
         parent_edge = Edge(parent_process_node, process_node, syscall)
         child_edge = Edge(process_node, child_process_node, syscall)
@@ -39,15 +40,17 @@ def build_file_read_write_nodes_and_edges(graph: Graph, file_traces: list, git_h
     """Build file nodes and their relationships to processes."""
     print("Building file read write nodes and edges")
     for trace in file_traces:
-        pid, filename, syscall, mode = trace
+        pid, filename, syscall, mode, open_flag = trace
         # filter files not part of the git repository
         if not is_file_tracked_by_git(filename):
             continue
         
         file_node = File(git_hash, filename)
         process_node = Process(git_hash=git_hash, pid=pid)
-        process_to_file_edge = Edge(process_node, file_node, syscall) if mode == -1 else Edge(file_node, process_node, syscall)
-
+        if "O_WRONLY" in open_flag or "O_CREAT" in open_flag or "O_RDWR" in open_flag or "O_TRUNC" in open_flag:
+            process_to_file_edge = Edge(file_node, process_node, syscall)
+        else:
+            process_to_file_edge = Edge(process_node, file_node, syscall)
         graph.add_node(file_node)
         graph.add_node(process_node)
         graph.add_edge(process_to_file_edge)
