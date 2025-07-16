@@ -6,6 +6,15 @@ from db import *
 from utils import *
 import os
 import sys
+from jinja2 import Template
+
+
+MAKE_FILE_RULE_TEMPLATE = Template("""
+{{ target }}: {{ prerequisites }}
+\t{{ recipe }}
+""")
+
+MAKE_FILE_NAME='reproduce.mk'
 
 def get_trace_data(git_hash: str, db) -> Tuple[list, list, list]:
     """Retrieve all trace data for a given git hash."""
@@ -95,36 +104,16 @@ def generate_graph(filename: str, git_hash: str) -> Graph:
     return graph
 
 
-def restore_file(file: str, git_hash: str) -> None:
-    '''
-    performs git restore to check out the file to a certain commit
-    '''
-
-    subprocess.run(
-        ["git", "restore", f"--source={git_hash}", "--", file],
-        check=True
-    )
-    
-
-def execute_command(command: str) -> None:
-    '''
-    Executes the given command 
-    '''
-    
-    subprocess.run(
-        ["bash", "-c", command],
-        stdout=sys.stdout,
-        stderr=sys.stderr,
-        check=True
-    )
-    
-
-
 
 def reproduce(file: str, git_hash: Optional[str]):
 
     # TODO: check if cwd is a valid directory being monitored
     cwd = os.getcwd()
+    # Check if the file is a directory
+    if os.path.isdir(file):
+        print(f"{file} is a directory, skipping...")
+        return
+
     # Check if the file exists in the git repository
     if not is_file_tracked_by_git(filename=file):
         print(f"{file} is not being tracked by the git repository")
@@ -141,22 +130,27 @@ def reproduce(file: str, git_hash: Optional[str]):
     graph = generate_graph(file, git_hash)
     # traverse up the graph to get parents
     adj = graph.get_adj_list()
-    for k,v in adj.items():
-        if isinstance(k, File):
-            print(k.filename, ":", end=" ")
-        else:
-            print(k.pid, ":", end=" ")
-        for n in v:
-            if isinstance(n, File):
-                print(n.filename, end=" ")
-            else:
-                print(n.pid, end=" ")
-        print()
+
+    # for k,v in adj.items():
+    #     if isinstance(k, File):
+    #         print(k.filename, ":", end=" ")
+    #     else:
+    #         print(k.pid, ":", end=" ")
+    #     for n in v:
+    #         if isinstance(n, File):
+    #             print(n.filename, end=" ")
+    #         else:
+    #             print(n.pid, end=" ")
+    #     print()
     
     if File(git_hash, file) not in adj:
         print(f"The current file {file} has no dependencies, directly checking the version {git_hash} out from git...")
-        restore_file(file, git_hash)
+        rule = MAKE_FILE_RULE_TEMPLATE.render(target=file, prerequisites="", recipe=f"git restore --source={git_hash} -- {file}")
+        with open(MAKE_FILE_NAME, 'a') as f:
+            f.write(rule)
         return
+
+    dependencies = []
 
     def dfs(node: Node):
         if node in adj:
@@ -165,6 +159,7 @@ def reproduce(file: str, git_hash: Optional[str]):
                     print(f"Parent file {parent.filename} of {file} located, calling reproduce on it...")
                     target_hash = get_closest_ancestor_hash(parent.filename, git_hash)
                     # call reproduce on that version
+                    dependencies.append(parent.filename)
                     reproduce(parent.filename, target_hash)
                 else:
                     print(f"Process {parent.pid} located from traversing the provenance graph, continuing traversing")
@@ -173,9 +168,11 @@ def reproduce(file: str, git_hash: Optional[str]):
     dfs(File(git_hash, file))
     print("Fetching command from database")
     command = get_command(git_hash, get_db())
-    # execute the command
-    print(f"executing command {command}")
-    execute_command(command)
+    # create the make rule
+    rule = MAKE_FILE_RULE_TEMPLATE.render(target=file, prerequisites=", ".join(dependencies), recipe=command)
+    with open(MAKE_FILE_NAME, 'a') as f:
+        f.write(rule)
+
 
 
 
