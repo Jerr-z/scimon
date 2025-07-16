@@ -26,21 +26,50 @@ def is_file_tracked_by_git(filename: str) -> bool:
 def is_git_hash_on_file(filename: str, git_hash: str) -> bool:
     if not git_hash: return True
 
-    changed_files = subprocess.run(
-        ["git", "diff-tree", "--no-commit-id", "--name-only", "-r", git_hash],
+    change_list = subprocess.run(
+        ["git", "log", "--pretty=format:%H", "--", filename],
         capture_output=True,
         text=True,
         check=True
     ).stdout.splitlines()
 
-    target = Path(filename).resolve()
-
-    for changed in changed_files:
-        file_path = Path(changed).resolve()
-        if file_path == target:
-            return True
-    
-    return False
+    return git_hash in change_list
     
 
+def is_ancestor(commit1: str, commit2: str) -> bool:
+    '''
+    Given an 2 commits, return True if commit1 is an ancestor of commit2 else False
+    '''
+    try:
+        result = subprocess.run(
+            ["git", "merge-base", "--is-ancestor", commit1, commit2],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            check=False
+        )
+        return result.returncode == 0
+    except subprocess.CalledProcessError:
+        print(f"Error checking commit ancestry for {commit1} {commit2}")
+        return False
 
+
+
+
+def get_closest_ancestor_hash(filename: str, git_hash: str) -> str:
+    '''
+    Given a filename and git_hash, return the hash that last changed the file which is right before the provided hash
+    '''
+    print(f"Locating closest commit for {filename} that is right before the commit {git_hash}")
+    # get a list of git-hashes that changed the supplied file
+    change_list = subprocess.run(
+        ["git", "log", "--pretty=format:%H", "--", filename],
+        capture_output=True,
+        text=True,
+        check=True
+    ).stdout.splitlines()
+    
+    # loop through the hashes
+    for i in range(len(change_list)):
+        # if current hash is before the specified git_hash and the previous one wasn't, then return it
+        if is_ancestor(change_list[i], git_hash):
+            return change_list[i]

@@ -1,4 +1,4 @@
-from typing import Optional, Set
+from typing import Optional, Set, Dict
 import graphviz
 
 class Node(object):
@@ -87,7 +87,19 @@ class Graph(object):
             out_node_name = str(e.out_node.pid) if isinstance(e.out_node, Process) else e.out_node.filename
             print(f"Edge Added: {in_node_name, out_node_name, e.syscall}")
             dot.edge(in_node_name, out_node_name, e.syscall)
-        
+        dot.unflatten(stagger=5)
         dot.render("prov", format='png', cleanup=True)
+
+    def get_adj_list(self) -> Dict:
+        '''
+        Returns an adjacency list with all the edges reversed
+        '''
+        res = {}
+        for e in self.edges:
+            if e.in_node in res:
+                res[e.in_node].append(e.out_node)
+            else:
+                res[e.in_node] = [e.out_node]
+        return res
     
 
