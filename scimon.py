@@ -56,7 +56,10 @@ def build_file_read_write_nodes_and_edges(graph: Graph, file_traces: list, git_h
             continue
         if os.path.isdir(filename):
             continue
-        filename = str(Path(filename).resolve())
+        # normalize filename
+        cwd = Path(os.getcwd())
+        abs_path = Path(filename).resolve()
+        filename = str(abs_path.relative_to(cwd))
 
         file_node = File(git_hash, filename)
         # if file with same path already in the graph, fetch that node in the graph
@@ -82,7 +85,10 @@ def build_file_execution_nodes_and_edges(graph: Graph, file_traces: list, git_ha
         if os.path.isdir(filename):
             continue
         # normalize filename
-        filename = str(Path(filename).resolve())
+        cwd = Path(os.getcwd())
+        abs_path = Path(filename).resolve()
+        filename = str(abs_path.relative_to(cwd))
+
 
         file_node = File(git_hash, filename)
         
@@ -116,10 +122,13 @@ def generate_graph(filename: str, git_hash: str) -> Graph:
 
 def reproduce(file: str, git_hash: Optional[str]):
 
-    # Normalize file
-    file = str(Path(file).resolve())
     # TODO: check if cwd is a valid directory being monitored
-    cwd = os.getcwd()
+    cwd = Path(os.getcwd())
+
+    # Normalize file
+    abs_path = Path(file).resolve()
+    file = str(abs_path.relative_to(cwd))
+
     # Check if the file is a directory
     if os.path.isdir(file):
         print(f"{file} is a directory, skipping...")
