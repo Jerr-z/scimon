@@ -7,7 +7,7 @@ from utils import *
 import os
 import sys
 from jinja2 import Template
-
+from pathlib import Path
 
 MAKE_FILE_RULE_TEMPLATE = Template("""
 {{ target }}: {{ prerequisites }}
@@ -54,8 +54,13 @@ def build_file_read_write_nodes_and_edges(graph: Graph, file_traces: list, git_h
         # filter files not part of the git repository
         if not is_file_tracked_by_git(filename):
             continue
-        
+        if os.path.isdir(filename):
+            continue
+        filename = str(Path(filename).resolve())
+
         file_node = File(git_hash, filename)
+        # if file with same path already in the graph, fetch that node in the graph
+        # TODO:
         process_node = Process(git_hash=git_hash, pid=pid)
         if "O_WRONLY" in open_flag or "O_CREAT" in open_flag or "O_RDWR" in open_flag or "O_TRUNC" in open_flag:
             process_to_file_edge = Edge(file_node, process_node, syscall)
@@ -74,10 +79,14 @@ def build_file_execution_nodes_and_edges(graph: Graph, file_traces: list, git_ha
         # filter files not part of the git repository
         if not is_file_tracked_by_git(filename):
             continue
-        
+        if os.path.isdir(filename):
+            continue
+        # normalize filename
+        filename = str(Path(filename).resolve())
+
         file_node = File(git_hash, filename)
+        
         process_node = Process(git_hash=git_hash, pid=pid)
-        write_syscalls = []
         process_to_file_edge = Edge(process_node, file_node, syscall)
 
         graph.add_node(file_node)
@@ -107,6 +116,8 @@ def generate_graph(filename: str, git_hash: str) -> Graph:
 
 def reproduce(file: str, git_hash: Optional[str]):
 
+    # Normalize file
+    file = str(Path(file).resolve())
     # TODO: check if cwd is a valid directory being monitored
     cwd = os.getcwd()
     # Check if the file is a directory
@@ -150,17 +161,18 @@ def reproduce(file: str, git_hash: Optional[str]):
             f.write(rule)
         return
 
-    dependencies = []
+    dependencies = set()
 
     def dfs(node: Node):
         if node in adj:
             for parent in adj[node]:
                 if isinstance(parent, File):
-                    print(f"Parent file {parent.filename} of {file} located, calling reproduce on it...")
-                    target_hash = get_closest_ancestor_hash(parent.filename, git_hash)
-                    # call reproduce on that version
-                    dependencies.append(parent.filename)
-                    reproduce(parent.filename, target_hash)
+                    if parent.filename not in dependencies:
+                        print(f"Parent file {parent.filename} of {file} located, calling reproduce on it...")
+                        target_hash = get_closest_ancestor_hash(parent.filename, git_hash)
+                        # call reproduce on that version
+                        dependencies.add(parent.filename)
+                        reproduce(parent.filename, target_hash)
                 else:
                     print(f"Process {parent.pid} located from traversing the provenance graph, continuing traversing")
                     dfs(parent)
@@ -169,7 +181,7 @@ def reproduce(file: str, git_hash: Optional[str]):
     print("Fetching command from database")
     command = get_command(git_hash, get_db())
     # create the make rule
-    rule = MAKE_FILE_RULE_TEMPLATE.render(target=file, prerequisites=", ".join(dependencies), recipe=command)
+    rule = MAKE_FILE_RULE_TEMPLATE.render(target=file, prerequisites=" ".join(dependencies), recipe=command)
     with open(MAKE_FILE_NAME, 'a') as f:
         f.write(rule)
 
