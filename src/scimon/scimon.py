@@ -1,9 +1,9 @@
 import argparse
 import subprocess
 from typing import Optional
-from models import Graph, Node, Edge
-from db import *
-from utils import *
+from scimon.models import Graph, Node, Edge
+from scimon.db import *
+from scimon.utils import *
 import os
 import sys
 from jinja2 import Template
@@ -215,5 +215,5 @@ def main():
     if args.command == "reproduce":
         reproduce(args.file[0], args.git_hash)
 
-if __name__ == "__main__":
-    main()
+# if __name__ == "__main__":
+#     main()

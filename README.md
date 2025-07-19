@@ -66,19 +66,29 @@ Then copy the contents of `commandhook.sh` into `~/.bashrc`, and restart the bas
 ## Usage
 
 ```bash
-# Adds a directory for monitoring
-scimon add [dir]
+# Adds current directory for monitoring (WIP)
+scimon init 
 
 # Reproduce a given file with optionally a specified commit hash, if no commit hash is specified then the latest version will be reproduced
 scimon reproduce [file] --git-hash=abc123
 
-# Outputs a provenance graph for the given file
+# Lists all directories currently being monitored (WIP)
+scimon list
+
+# Removes a directory from being monitored (WIP)
+scimon remove [dir]
+
+# Outputs a provenance graph for the given file (WIP)
 scimon visualize [file] --git-hash=abc123
 ```
 
 ### Running the source code
 
 I would highly recommend using `uv` to manage the dependencies of this project. Conda works? as an alternative.
+
+1. Navigate to project root
+2. `pipx install .`
+3. Done
 
 ## Logic Overview
 

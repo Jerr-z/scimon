@@ -1,10 +1,25 @@
 [project]
 name = "scimon"
-version = "0.1.0"
-description = "Add your description here"
+dynamic = ["version"]
+description = "A scientific reproducibility tool supporting existing workflows"
 readme = "README.md"
 requires-python = ">=3.9"
 dependencies = [
     "graphviz>=0.20.3",
     "jinja2>=3.1.6",
+    "typer>=0.16.0",
 ]
+license = "MIT"
+
+[project.scripts]
+scimon = "scimon.cli:app"
+
+[project.entry-points."pipx.run"]
+scimon = "scimon.cli:app"
+
+[build-system]
+requires = ["hatchling >= 1.26"]
+build-backend = "hatchling.build"
+
+[tool.hatch.version]
+path = "src/scimon/__init__.py"
