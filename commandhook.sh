@@ -389,10 +389,10 @@ _pre_command_git_check() {
   type=$(type -t -- "${cmd_and_args[0]}")
   local full_cmd=$(history 1 | sed -E 's/^[[:space:]]*[0-9]+[[:space:]]*//')
   local history_count=$(history 1 | awk '{print $1}')
-  # do our check
+  
   _git_commit_if_dirty "$full_cmd" 1
   echo "command to be executed: $BASH_COMMAND"
-  # echo $IS_PIPE_IN_PROGRESS
+
   # handle pipes
   if [[ ("$full_cmd" == *"|"* || "$full_cmd" == *">"*)  && $IS_PIPE_IN_PROGRESS -eq 0 ]]; then
     echo "Running pipe command under strace"
@@ -409,14 +409,10 @@ _pre_command_git_check() {
     echo "Running command under strace: $BASH_COMMAND"
     strace -f -e trace=openat,openat2,open,creat,access,faccessat,faccessat2,statx,stat,lstat,fstat,readlink,readlinkat,rename,renameat,renameat2,link,linkat,symlink,symlinkat,mkdir,mkdirat,execve,execveat,fork,vfork,clone,clone3,connect,accept,accept4,fchownat,fchmodat -o $STRACE_LOG_DIR -- "${cmd_and_args[@]}" 
     # TODO: Maybe flush out the strace log 
-
-    # re-install the DEBUG hook for next time
-    trap '_pre_command_git_check' DEBUG
     # terminate the original command early so it doesn't execute the same effects twice
     return 1
   fi
-  # re-install the DEBUG hook for next time
-  trap '_pre_command_git_check' DEBUG
+
   PROMPT_COMMAND='_post_command_git_check'
 }
 
