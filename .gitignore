@@ -2,3 +2,4 @@ __pycache__
 .venv
 scimon.egg-info
 dist
+build
