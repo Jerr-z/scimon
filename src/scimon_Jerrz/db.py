@@ -1,5 +1,5 @@
 import sqlite3
-from scimon.models import Process, File, Edge
+from scimon_Jerrz.models import Process, File, Edge
 from typing import List, Tuple
 DB_NAME=".db"
 

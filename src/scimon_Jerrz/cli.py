@@ -1,7 +1,7 @@
 from typing import Optional
 import typer
 from scimon import __app_name__, __version__
-from scimon.scimon import reproduce as r
+from scimon_Jerrz.scimon import reproduce as r
 import os
 app = typer.Typer()
 

@@ -1,5 +1,5 @@
 [project]
-name = "scimon"
+name = "scimon_Jerrz"
 dynamic = ["version"]
 description = "A scientific reproducibility tool supporting existing workflows"
 readme = "README.md"
@@ -9,17 +9,26 @@ dependencies = [
     "jinja2>=3.1.6",
     "typer>=0.16.0",
 ]
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "Operating System :: OS Independent",
+]
 license = "MIT"
+license-files = ["LICEN[CS]E*"]
+
+[project.urls]
+Homepage = "https://github.com/Jerr-z/scimon"
+Issues = "https://github.com/Jerr-z/scimon/issues"
 
 [project.scripts]
-scimon = "scimon.cli:app"
+scimon = "scimon_Jerrz.cli:app"
 
 [project.entry-points."pipx.run"]
-scimon = "scimon.cli:app"
+scimon = "scimon_Jerrz.cli:app"
 
 [build-system]
 requires = ["hatchling >= 1.26"]
 build-backend = "hatchling.build"
 
 [tool.hatch.version]
-path = "src/scimon/__init__.py"
+path = "src/scimon_Jerrz/__init__.py"

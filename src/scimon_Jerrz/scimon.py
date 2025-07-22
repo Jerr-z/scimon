@@ -1,11 +1,8 @@
-import argparse
-import subprocess
 from typing import Optional
-from scimon.models import Graph, Node, Edge
-from scimon.db import *
-from scimon.utils import *
+from scimon_Jerrz.models import Graph, Node, Edge
+from scimon_Jerrz.db import *
+from scimon_Jerrz.utils import *
 import os
-import sys
 from jinja2 import Template
 from pathlib import Path
 
@@ -198,22 +195,22 @@ def reproduce(file: str, git_hash: Optional[str]):
 
 
 
-def main():
-    parser = argparse.ArgumentParser(description="A passive scientific reproducibility tool")
-    subparsers = parser.add_subparsers(dest="command")
+# def main():
+#     parser = argparse.ArgumentParser(description="A passive scientific reproducibility tool")
+#     subparsers = parser.add_subparsers(dest="command")
 
-    # reproduce [file] --git-hash=...
-    reproduce_parser = subparsers.add_parser("reproduce", help="Reproduce a given file")
-    reproduce_parser.add_argument("file", nargs=1, help="The filename of the file you want to reproduce")
-    reproduce_parser.add_argument("--git-hash", nargs="?", help="Specific git version of the file")
+#     # reproduce [file] --git-hash=...
+#     reproduce_parser = subparsers.add_parser("reproduce", help="Reproduce a given file")
+#     reproduce_parser.add_argument("file", nargs=1, help="The filename of the file you want to reproduce")
+#     reproduce_parser.add_argument("--git-hash", nargs="?", help="Specific git version of the file")
 
-    # TODO
-    # add [directory]
-    # list [directory]
-    # remove [directory]
-    args = parser.parse_args()
-    if args.command == "reproduce":
-        reproduce(args.file[0], args.git_hash)
+#     # TODO
+#     # add [directory]
+#     # list [directory]
+#     # remove [directory]
+#     args = parser.parse_args()
+#     if args.command == "reproduce":
+#         reproduce(args.file[0], args.git_hash)
 
 # if __name__ == "__main__":
 #     main()
