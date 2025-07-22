@@ -1,7 +1,7 @@
 from typing import Optional
-from scimon_Jerrz.models import Graph, Node, Edge
-from scimon_Jerrz.db import *
-from scimon_Jerrz.utils import *
+from scimon.models import Graph, Node, Edge
+from scimon.db import *
+from scimon.utils import *
 import os
 from jinja2 import Template
 from pathlib import Path
