@@ -10,7 +10,9 @@ def get_latest_commit_for_file(filename: str) -> str:
         if not git_hash:
             raise ValueError(f"No commit history for {filename}")
         return git_hash
-    except:
+    except Exception as e:
+        if isinstance(e, ValueError) and "No commit history" in str(e):
+            raise
         raise ValueError(f"Error retrieving git history for {filename}")
 
 def is_file_tracked_by_git(filename: str) -> bool:
@@ -73,3 +75,4 @@ def get_closest_ancestor_hash(filename: str, git_hash: str) -> str:
         # if current hash is before the specified git_hash and the previous one wasn't, then return it
         if is_ancestor(change_list[i], git_hash):
             return change_list[i]
+    raise ValueError("Provided git_hash is invalid")
