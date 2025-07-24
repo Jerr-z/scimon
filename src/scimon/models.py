@@ -1,7 +1,7 @@
-from typing import Optional, Set, Dict
+from typing import Optional, Set, Dict, NamedTuple
 import graphviz
 
-class Node(object):
+class Node:
     def __init__(self, git_hash: str):
         self.git_hash = git_hash
 
@@ -26,7 +26,7 @@ class File(Node):
     def __hash__(self):
         return hash((self.git_hash, self.filename))
     
-class Edge(object):
+class Edge:
     def __init__(self, in_node: Node, out_node: Node, syscall: str):
         self.in_node = in_node
         self.out_node = out_node
@@ -38,7 +38,7 @@ class Edge(object):
     def __hash__(self):
         return hash((self.in_node, self.out_node, self.syscall))
 
-class Graph(object):
+class Graph:
 
     def __init__(self, nodes: Optional[Set[Node]] = None, edges: Optional[Set[Edge]] = None):
         self.nodes = set() if not nodes else nodes
@@ -136,4 +136,22 @@ class Graph(object):
                 res[e.in_node] = [e.out_node]
         return res
     
+class ProcessTrace(NamedTuple):
+    parent_pid: int
+    pid: int
+    child_pid: int
+    syscall: str
+
+class FileOpenTrace(NamedTuple):
+    pid: int
+    filename: str
+    syscall: str
+    mode: int
+    open_flag: str
+
+class FileExecutionTrace(NamedTuple):
+    pid: int
+    filename: str
+    syscall:str
+
 
