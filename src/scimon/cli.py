@@ -88,11 +88,22 @@ def list() -> None:
     with open(dirs_dir, "r") as f:
         dirs = f.readlines()
         for d in dirs:
-            typer.echo(d.replace("\n", ""))
+            typer.echo(d.strip("\n"))
 
 @app.command(help="Removes a directory from being monitored")
 def remove(dir: str = typer.Argument(help="Directory to remove", default=os.getcwd())) -> None:
-    pass
+    dirs_dir = Path(os.path.expanduser("~/.scimon/.dirs"))
+    if not dirs_dir.exists():
+        dirs_dir.touch()
+    with open(dirs_dir, "r") as f:
+        lines = f.readlines()
+        with open(dirs_dir, "w") as f:
+            target = Path(dir)
+            for line in lines:
+                if Path(line.strip("\n")) != target:
+                    f.write(line)
+                else:
+                    typer.echo("Directory successfully removed from monitoring")
 
 @app.command(help="Install bash hooks and initialize app directories")
 def setup() -> None:
