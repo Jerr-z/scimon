@@ -95,6 +95,7 @@ def remove(dir: str = typer.Argument(help="Directory to remove", default=os.getc
     dirs_dir = Path(os.path.expanduser("~/.scimon/.dirs"))
     if not dirs_dir.exists():
         dirs_dir.touch()
+        return
     with open(dirs_dir, "r") as f:
         lines = f.readlines()
         with open(dirs_dir, "w") as f:
