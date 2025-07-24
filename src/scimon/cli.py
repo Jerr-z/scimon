@@ -82,12 +82,16 @@ def init() -> None:
     
 @app.command(help="Lists all directories currently being monitored")
 def list() -> None:
-    # TODO
-    pass
+    dirs_dir = Path(os.path.expanduser("~/.scimon/.dirs"))
+    if not dirs_dir.exists():
+        dirs_dir.touch()
+    with open(dirs_dir, "r") as f:
+        dirs = f.readlines()
+        for d in dirs:
+            typer.echo(d.replace("\n", ""))
 
 @app.command(help="Removes a directory from being monitored")
 def remove(dir: str = typer.Argument(help="Directory to remove", default=os.getcwd())) -> None:
-    # TODO
     pass
 
 @app.command(help="Install bash hooks and initialize app directories")
@@ -111,4 +115,4 @@ def setup() -> None:
 
     except OSError:
         typer.echo("App directory already exists, exiting...")
-    typer.echo("Please restart your bash shell or source .bashrc for changes to take effect")
+    typer.echo("Please restart your terminal or source .bashrc for changes to take effect")
