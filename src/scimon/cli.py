@@ -2,8 +2,14 @@ from typing import Optional
 import typer
 from scimon import __app_name__, __version__, __file__
 from scimon.scimon import reproduce as r
+from scimon.db import initialize_db
+from scimon.utils import add_to_gitignore
 import os
+from pathlib import Path
+import subprocess
+
 app = typer.Typer()
+MONITORED_DIR=os.path.expanduser("~/.scimon/.dirs")
 
 def _version_callback(value: bool) -> None:
     if value:
@@ -30,10 +36,50 @@ def reproduce(
 
 @app.command(help="Initialize the current working directory for monitoring")
 def init() -> None:
-    # Adds cwd to ~/.scimon/.autogitcheck
-    # TODO
-    pass
+    cwd = Path(os.getcwd())
+    home_path = os.path.expanduser("~")
 
+    if not cwd.is_relative_to(home_path):
+        typer.echo("Current working directory not relative to the current user's HOME path, exiting...")
+        return
+    
+    # write cwd into ~/.scimon/.dirs
+    with open(MONITORED_DIR, "r") as f:
+        for p in f.readlines():
+            if Path(p) == cwd:
+                typer.echo("Path already monitored, exiting...")
+                return
+    with open(MONITORED_DIR, "a+") as f:
+        f.write(str(cwd.relative_to(home_path))+"\n")
+    
+    # append '.db' into .gitignore TODO
+    add_to_gitignore(".db")
+
+    # initialize git repository
+    try:
+        subprocess.run(
+            ["git", "init"],
+            check=True
+        )
+        subprocess.run(
+            ["git", "add", "-A"],
+            check=True
+        )
+        subprocess.run(
+            ["git", "commit", "-m", "Initial commit"],
+            check=True
+        )
+        typer.echo("Git repository initialized")
+    except subprocess.CalledProcessError:
+        typer.echo("Error initializing git repository")
+
+    # define schemas in the database
+    try:
+        initialize_db()
+        typer.echo("Sqlite3 database initialized")
+    except Exception:
+        typer.echo("Error initializing sqlite3 database")
+    
 @app.command(help="Lists all directories currently being monitored")
 def list() -> None:
     # TODO

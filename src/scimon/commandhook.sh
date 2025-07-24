@@ -4,7 +4,7 @@
 shopt -s extdebug
 
 # Directories
-GITCHECK_DIRS="$HOME/.scimon/.autogitcheck"
+GITCHECK_DIRS="$HOME/.scimon/.dirs"
 STRACE_LOG_DIR="$HOME/.scimon/strace.log"
 
 # Variables

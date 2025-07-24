@@ -1,5 +1,6 @@
 import subprocess
 from pathlib import Path
+import os
 
 def get_latest_commit_for_file(filename: str) -> str:
     try:
@@ -76,3 +77,18 @@ def get_closest_ancestor_hash(filename: str, git_hash: str) -> str:
         if is_ancestor(change_list[i], git_hash):
             return change_list[i]
     raise ValueError("Provided git_hash is invalid")
+
+def add_to_gitignore(pattern: str) -> None:
+    """Add a pattern to .gitignore if it doesn't already exist."""
+    gitignore_path = ".gitignore"
+    
+    # Check if .gitignore exists and if the pattern is already in it
+    if os.path.exists(gitignore_path):
+        with open(gitignore_path, "r") as f:
+            content = f.read()
+        if f"{pattern}\n" in content:
+            return  # Pattern already exists
+    
+    # Append the pattern
+    with open(gitignore_path, "a+") as f:
+        f.write(f"{pattern}\n")
