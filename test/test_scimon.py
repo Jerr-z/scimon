@@ -1,8 +1,5 @@
-import os
-import sys
 import pytest
 from unittest.mock import patch, MagicMock, mock_open
-from pathlib import Path
 
 # Import the modules to test
 from scimon.scimon import (
@@ -431,7 +428,7 @@ class TestReproduce:
         mock_get_command.return_value = command
         mock_get_closest.return_value = "def456"  # Different hash for dependency
         mock_db.return_value = None
-        
+
         # Create a graph with dependencies
         graph_mock = MagicMock()
         file_node = File(git_hash, file)
