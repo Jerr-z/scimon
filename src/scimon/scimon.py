@@ -28,19 +28,21 @@ def build_process_nodes_and_edges(graph: Graph, processes_trace: List[ProcessTra
 
     for trace in processes_trace:
 
-        parent_process_node = Process(git_hash=git_hash, pid=trace.parent_pid)
+       
         process_node = Process(git_hash=git_hash, pid=trace.pid)
         child_process_node = Process(git_hash=git_hash, pid=trace.child_pid)
         
-        parent_edge = Edge(parent_process_node, process_node, trace.syscall)
         child_edge = Edge(process_node, child_process_node, trace.syscall)
 
-        graph.add_node(parent_process_node)
         graph.add_node(process_node)
         graph.add_node(child_process_node)
-        graph.add_edge(parent_edge)
         graph.add_edge(child_edge)
-
+        
+        if trace.parent_pid:
+            parent_process_node = Process(git_hash=git_hash, pid=trace.parent_pid)
+            parent_edge = Edge(parent_process_node, process_node, trace.syscall)
+            graph.add_node(parent_process_node)
+            graph.add_edge(parent_edge)
 
 def build_file_read_write_nodes_and_edges(graph: Graph, file_traces: List[FileOpenTrace], git_hash: str, is_execution: bool = False):
     """Build file nodes and their relationships to processes."""
