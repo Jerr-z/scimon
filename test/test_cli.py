@@ -31,76 +31,79 @@ def test_reproduce(mock_reproduce):
     assert result.exit_code == 0
     mock_reproduce.assert_called_once_with("test.py", "abcdef")
 
-@patch("scimon.cli.Path")
-@patch("scimon.cli.os")
-@patch("scimon.cli.subprocess.run")
-@patch("scimon.cli.add_to_gitignore")
-@patch("scimon.cli.initialize_db")
-@patch("scimon.cli.open", new_callable=mock_open)
-def test_init_success(mock_file, mock_init_db, mock_add_gitignore, mock_run, mock_os, mock_path):
-    """Test successful initialization with the init command."""
-    # Setup mocks
-    mock_os.getcwd.return_value = "/home/user/project"
-    mock_os.path.expanduser.return_value = "/home/user"
-    mock_path.return_value.is_relative_to.return_value = True
-    mock_path.return_value.relative_to.return_value = Path("project")
-    mock_file().readlines.return_value = []
-    
-    result = runner.invoke(app, ["init"])
-    assert result.exit_code == 0
-    
-    mock_add_gitignore.assert_called_once_with(".db")
-    mock_init_db.assert_called_once()
-    assert mock_run.call_count == 3  # git init, git add, git commit
-    mock_file.assert_any_call(MONITORED_DIR, "r")
-    mock_file.assert_any_call(MONITORED_DIR, "a+")
+class TestInit:
 
-@patch("scimon.cli.Path")
-@patch("scimon.cli.os")
-@patch("scimon.cli.open", new_callable=mock_open)
-def test_init_already_monitored(mock_file, mock_os, mock_path):
-    """Test init command when path is already monitored."""
-    mock_os.getcwd.return_value = "/home/user/project"
-    mock_os.path.expanduser.return_value = "/home/user"
-    mock_path.return_value.is_relative_to.return_value = True
-    mock_path.return_value.__eq__.return_value = True
-    mock_file().readlines.return_value = ["project\n"]
-    
-    result = runner.invoke(app, ["init"])
-    assert result.exit_code == 0
-    assert "Path already monitored" in result.stdout
+    @patch("scimon.cli.Path")
+    @patch("scimon.cli.os")
+    @patch("scimon.cli.subprocess.run")
+    @patch("scimon.cli.add_to_gitignore")
+    @patch("scimon.cli.initialize_db")
+    @patch("scimon.cli.open", new_callable=mock_open)
+    def test_init_success(mock_file, mock_init_db, mock_add_gitignore, mock_run, mock_os, mock_path):
+        """Test successful initialization with the init command."""
+        # Setup mocks
+        mock_os.getcwd.return_value = "/home/user/project"
+        mock_os.path.expanduser.return_value = "/home/user"
+        mock_path.return_value.is_relative_to.return_value = True
+        mock_path.return_value.relative_to.return_value = Path("project")
+        mock_file().readlines.return_value = []
+        
+        result = runner.invoke(app, ["init"])
+        assert result.exit_code == 0
+        
+        mock_add_gitignore.assert_called_once_with(".db")
+        mock_init_db.assert_called_once()
+        assert mock_run.call_count == 3  # git init, git add, git commit
+        mock_file.assert_any_call(MONITORED_DIR, "r")
+        mock_file.assert_any_call(MONITORED_DIR, "a+")
 
-@patch("scimon.cli.Path")
-@patch("scimon.cli.os")
-def test_init_not_in_home(mock_os, mock_path):
-    """Test init command when path is not in user's home."""
-    mock_path.return_value.is_relative_to.return_value = False
-    
-    result = runner.invoke(app, ["init"])
-    assert result.exit_code == 0
-    assert "not relative to the current user's HOME path" in result.stdout
+    @patch("scimon.cli.Path")
+    @patch("scimon.cli.os")
+    @patch("scimon.cli.open", new_callable=mock_open)
+    def test_init_already_monitored(mock_file, mock_os, mock_path):
+        """Test init command when path is already monitored."""
+        mock_os.getcwd.return_value = "/home/user/project"
+        mock_os.path.expanduser.return_value = "/home/user"
+        mock_path.return_value.is_relative_to.return_value = True
+        mock_path.return_value.__eq__.return_value = True
+        mock_file().readlines.return_value = ["project\n"]
+        
+        result = runner.invoke(app, ["init"])
+        assert result.exit_code == 0
+        assert "Path already monitored" in result.stdout
 
-@patch("scimon.cli.Path")
-@patch("scimon.cli.open", new_callable=mock_open)
-def test_list_with_dirs(mock_file, mock_path):
-    """Test list command when directories are being monitored."""
-    mock_path.return_value.exists.return_value = True
-    mock_file().readlines.return_value = ["path1\n", "path2\n"]
-    
-    result = runner.invoke(app, ["list"])
-    assert result.exit_code == 0
-    assert "path1" in result.stdout
-    assert "path2" in result.stdout
+    @patch("scimon.cli.Path")
+    @patch("scimon.cli.os")
+    def test_init_not_in_home(mock_os, mock_path):
+        """Test init command when path is not in user's home."""
+        mock_path.return_value.is_relative_to.return_value = False
+        
+        result = runner.invoke(app, ["init"])
+        assert result.exit_code == 0
+        assert "not relative to the current user's HOME path" in result.stdout
 
-@patch("scimon.cli.Path")
-@patch("scimon.cli.open", new_callable=mock_open)
-def test_list_no_dirs_file(mock_file, mock_path):
-    """Test list command when dirs file doesn't exist."""
-    mock_path.return_value.exists.return_value = False
-    
-    result = runner.invoke(app, ["list"])
-    assert result.exit_code == 0
-    mock_path.return_value.touch.assert_called_once()
+class TestList:
+    @patch("scimon.cli.Path")
+    @patch("scimon.cli.open", new_callable=mock_open)
+    def test_list_with_dirs(mock_file, mock_path):
+        """Test list command when directories are being monitored."""
+        mock_path.return_value.exists.return_value = True
+        mock_file().readlines.return_value = ["path1\n", "path2\n"]
+        
+        result = runner.invoke(app, ["list"])
+        assert result.exit_code == 0
+        assert "path1" in result.stdout
+        assert "path2" in result.stdout
+
+    @patch("scimon.cli.Path")
+    @patch("scimon.cli.open", new_callable=mock_open)
+    def test_list_no_dirs_file(mock_file, mock_path):
+        """Test list command when dirs file doesn't exist."""
+        mock_path.return_value.exists.return_value = False
+        
+        result = runner.invoke(app, ["list"])
+        assert result.exit_code == 0
+        mock_path.return_value.touch.assert_called_once()
 
 @patch("scimon.cli.os")
 @patch("scimon.cli.Path")
@@ -140,3 +143,6 @@ def test_setup(mock_file, mock_os):
     assert result.exit_code == 0
     assert "Bash hook already installed" in result.stdout
     assert "App directory already exists" in result.stdout
+
+if __name__ == "__main__":
+    pytest.main()
