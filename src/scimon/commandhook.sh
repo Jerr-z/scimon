@@ -347,7 +347,7 @@ _scimon_git_check() {
 
         if (( ! is_pre_command )); then
           _scimon_update_post_command_commit_hash "$(git rev-parse HEAD^)" "$(git rev-parse HEAD)"
-          _scimon_parse_strace &
+          _scimon_parse_strace
         fi
 
         for file in $dirty_files; do
