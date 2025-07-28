@@ -1,6 +1,8 @@
 #!/bin/bash
 
 #------hook to automatically commit changes in git repositories------------
+shopt -s extdebug
+
 # Directories
 GITCHECK_DIRS="$HOME/.scimon/.dirs"
 STRACE_LOG_DIR="$HOME/.scimon/strace.log"
@@ -345,7 +347,7 @@ _scimon_git_check() {
 
         if (( ! is_pre_command )); then
           _scimon_update_post_command_commit_hash "$(git rev-parse HEAD^)" "$(git rev-parse HEAD)"
-          _scimon_parse_strace
+          _scimon_parse_strace &
         fi
 
         for file in $dirty_files; do
@@ -424,9 +426,14 @@ _scimon_post_exec_hook() {
 }
 
 # ------------------------------------ Entry Point -------------------------------
-_scimon_init() {
+scimon_enable() {
   PROMPT_COMMAND='_scimon_post_exec_hook'
   trap '_scimon_pre_exec_hook' DEBUG
 }
 
-PROMPT_COMMAND='_scimon_init'
+scimon_disable() {
+  trap - DEBUG
+  PROMPT_COMMAND=''
+}
+
+PROMPT_COMMAND='scimon_enable'
