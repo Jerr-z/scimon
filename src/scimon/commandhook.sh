@@ -305,6 +305,9 @@ _handle_file_execute() {
 _git_commit_if_dirty() {
   local msg="$1"
   local is_pre_command="$2"
+  if [[ "$msg" == *"scimon"* ]]; then
+    return 1
+  fi
   while IFS="" read -r dir || [ -n "$dir" ] 
   do
     echo "Checking directory: $dir $msg $is_pre_command"
@@ -368,19 +371,16 @@ _pre_command_git_check() {
   [[ -n ${COMP_LINE-} ]] && return 0
   [[ -n ${COMP_POINT-} ]] && return 0
   # Is source skippable?
-  case "$BASH_COMMAND" in
-    _post_command_git_check*   |   \
-    trap\ -*       |   \
-    __vsc_*        | \
-    source* | \
-    strace*) 
-      return 0
-      ;;
-  esac
   # turn off the DEBUG trap so nothing inside re-triggers us
   # DO NOT PUT ANY HOOK LOGIC ABOVE THIS SINCE IT WILL TRIGGER RECURSION
   trap - DEBUG
-  
+  case "$BASH_COMMAND" in
+    _post_command_git_check* | \
+    strace* | \
+    scimon*) 
+      return 0
+      ;;
+  esac
 
   local cmd_and_args=()
   # split the command into an array to handle cases with spaces
