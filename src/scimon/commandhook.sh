@@ -15,7 +15,7 @@ IS_PIPE_IN_PROGRESS=1 # setting it to 1 to take care of the case when history 1 
 
 
 # Create the tables if they don't exist
-_create_tables() {
+_scimon_initialize_db() {
 
 
     sqlite3 .db 'CREATE TABLE IF NOT EXISTS commands (
@@ -74,7 +74,7 @@ CREATE INDEX IF NOT EXISTS idx_executed_files_git_hash on executed_files(commit_
 
 # Table operations
 
-_insert_command() {
+_scimon_insert_command() {
 
   local pre_commit="$1"
   local post_commit="$2"
@@ -88,7 +88,7 @@ _insert_command() {
 
 }
 
-_update_post_command_commit_hash() {
+_scimon_update_post_command_commit_hash() {
 
     local pre_command_commit="$1"
     local post_command_commit="$2"
@@ -99,7 +99,7 @@ _update_post_command_commit_hash() {
 
 }
 
-_insert_file_change() {
+_scimon_insert_file_change() {
 
   local commit="$1"
   local filename="$2"
@@ -110,7 +110,7 @@ _insert_file_change() {
 
 
 
-_insert_process() {
+_scimon_insert_process() {
   # TODO: is it possible that there might be multiple possible pids with the same child pid and commit hash?
   local pid="$1"
   local commit="$2"
@@ -127,7 +127,7 @@ _insert_process() {
 }
 
 
-_insert_opened_file() {
+_scimon_insert_opened_file() {
   local commit="$1"
   local filename="$2"
   local mode="$3"
@@ -142,7 +142,7 @@ _insert_opened_file() {
 }
 
 
-_insert_executed_file() {
+_scimon_insert_executed_file() {
   local filename="$1"
   local commit="$2"
   local pid="$3"
@@ -157,7 +157,7 @@ _insert_executed_file() {
 }
 
 # ---------------- strace parsing ----------------
-_parse_strace() {
+_scimon_parse_strace() {
 
   
   echo "Parsing strace"
@@ -176,15 +176,15 @@ _parse_strace() {
       case "$syscall" in
         fork|clone|clone3|vfork)
         # processes table
-        _handle_processes "$pid" "$syscall" "$args" "$retval"
+        _scimon_handle_processes "$pid" "$syscall" "$args" "$retval"
         ;;
         open|openat|openat2|creat|access|faccessat|faccessat2|stat|lstat|stat64|oldstat|oldlstat|fstatat64|newfstatat|statx|readlink|readlinkat|mkdir|mkdirat|chdir|rename|renameat|renameat2|link|linkat|symlink|symlinkat|connect|accept|accept4|socketcall)
         # handle file opening
-        _handle_file_open "$pid" "$syscall" "$args" "$retval"
+        _scimon_handle_file_open "$pid" "$syscall" "$args" "$retval"
         ;;
         execve|execveat)
         # handle executed files
-        _handle_file_execute "$pid" "$syscall" "$args" "$retval"
+        _scimon_handle_file_execute "$pid" "$syscall" "$args" "$retval"
         ;;    
         esac    
     fi
@@ -193,7 +193,7 @@ _parse_strace() {
 
 }
 
-_is_file_tracked_by_git() {
+_scimon_is_file_tracked_by_git() {
   local filename="$1"
 
   if git ls-files --error-unmatch "$filename" &>/dev/null; then
@@ -203,7 +203,7 @@ _is_file_tracked_by_git() {
   return 1
 }
 
-_handle_processes() {
+_scimon_handle_processes() {
   # store the system calls into the processes table
   local pid="$1"
   local syscall="$2"
@@ -211,10 +211,10 @@ _handle_processes() {
   local retval="$4"
 
   # i think its fine to call git directly cuz parent function should be invoked in the proper git directory
-  _insert_process "$pid" "$(git rev-parse HEAD)" "$retval" "$syscall"
+  _scimon_insert_process "$pid" "$(git rev-parse HEAD)" "$retval" "$syscall"
 }
 
-_handle_file_open() {
+_scimon_handle_file_open() {
   # store the system calls into opened_files table
   local pid="$1"
   local syscall="$2"
@@ -227,7 +227,7 @@ _handle_file_open() {
   local is_dir
   local open_flag=""
 
-  if ! _is_file_tracked_by_git "$filename"; then
+  if ! _scimon_is_file_tracked_by_git "$filename"; then
     return 0
   fi
 
@@ -250,10 +250,10 @@ _handle_file_open() {
   [[ -d "$filename" ]] && is_dir=1 || is_dir=0
 
   # store into db
-  _insert_opened_file "$(git rev-parse HEAD)" "$filename" "$mode" "$is_dir" "$pid" "$syscall" "$open_flag"
+  _scimon_insert_opened_file "$(git rev-parse HEAD)" "$filename" "$mode" "$is_dir" "$pid" "$syscall" "$open_flag"
 }
 
-_handle_file_execute() {
+_scimon_handle_file_execute() {
   # store the system calls into the executed_files table
   local pid="$1"
   local syscall="$2"
@@ -295,14 +295,14 @@ _handle_file_execute() {
   envp=$(echo "$envp" | sed -E 's/[[:space:]]*\/\*.*\*\/[[:space:]]*$//')
   
   # echo "Exec: PID: $pid, filename: $filename, argv: $argv, envp: $envp, retval: $retval"
-  _insert_executed_file "$filename" "$(git rev-parse HEAD)" "$pid" "$argv" "$envp" "$workingdir" "$syscall"
+  _scimon_insert_executed_file "$filename" "$(git rev-parse HEAD)" "$pid" "$argv" "$envp" "$workingdir" "$syscall"
 }
 
 
 # ---------------------- MAIN HOOK LOGIC ---------------------------
 
 
-_git_commit_if_dirty() {
+_scimon_git_check() {
   local msg="$1"
   local is_pre_command="$2"
   if [[ "$msg" == *"scimon"* ]]; then
@@ -324,7 +324,7 @@ _git_commit_if_dirty() {
           git init
           git add -A
           git commit -m "Initial commit"
-          _create_tables
+          _scimon_initialize_db
         else
           echo "Skipping $dir, not a git repository."
           return
@@ -337,7 +337,7 @@ _git_commit_if_dirty() {
 
         # when we are doing pre-command git check and see dirty files, simply commit. No need to add a command into the db.
         if (( ! is_pre_command )); then
-          _insert_command "$(git rev-parse HEAD)" "" "$msg"
+          _scimon_insert_command "$(git rev-parse HEAD)" "" "$msg"
         fi
 
         dirty_files=$(git status --porcelain --untracked-files=all | awk '{print $2}');
@@ -347,12 +347,12 @@ _git_commit_if_dirty() {
         git commit -m "$msg" || echo "commit failed in $dir"
 
         if (( ! is_pre_command )); then
-          _update_post_command_commit_hash "$(git rev-parse HEAD^)" "$(git rev-parse HEAD)"
-          _parse_strace
+          _scimon_update_post_command_commit_hash "$(git rev-parse HEAD^)" "$(git rev-parse HEAD)"
+          _scimon_parse_strace
         fi
 
         for file in $dirty_files; do
-          _insert_file_change "$(git rev-parse HEAD)" "$file"
+          _scimon_insert_file_change "$(git rev-parse HEAD)" "$file"
         done
       fi
     )
@@ -360,7 +360,7 @@ _git_commit_if_dirty() {
 }
 
 # Before each user command
-_pre_command_git_check() {
+_scimon_pre_exec_hook() {
   # Skip commands with heredoc redirection that can break strace
   if [[ "$BASH_COMMAND" == *'<<'* ]]; then
       return 0
@@ -375,7 +375,7 @@ _pre_command_git_check() {
   # DO NOT PUT ANY HOOK LOGIC ABOVE THIS SINCE IT WILL TRIGGER RECURSION
   trap - DEBUG
   case "$BASH_COMMAND" in
-    _post_command_git_check* | \
+    _scimon_post_exec_hook* | \
     strace* | \
     scimon*) 
       return 0
@@ -390,15 +390,15 @@ _pre_command_git_check() {
   local full_cmd=$(history 1 | sed -E 's/^[[:space:]]*[0-9]+[[:space:]]*//')
   local history_count=$(history 1 | awk '{print $1}')
   
-  _git_commit_if_dirty "$full_cmd" 1
+  _scimon_git_check "$full_cmd" 1
   echo "command to be executed: $BASH_COMMAND"
 
   # handle pipes
   if [[ ("$full_cmd" == *"|"* || "$full_cmd" == *">"*)  && $IS_PIPE_IN_PROGRESS -eq 0 ]]; then
     echo "Running pipe command under strace"
     IS_PIPE_IN_PROGRESS=1
-    strace -f -e trace=openat,openat2,open,creat,access,faccessat,faccessat2,statx,stat,lstat,fstat,readlink,readlinkat,rename,renameat,renameat2,link,linkat,symlink,symlinkat,mkdir,mkdirat,execve,execveat,fork,vfork,clone,clone3,connect,accept,accept4,fchownat,fchmodat -o $STRACE_LOG_DIR -- bash -c "$full_cmd"
-    trap '_pre_command_git_check' DEBUG
+    strace -f -e trace=openat,openat2,open,creat,access,faccessat,faccessat2,statx,stat,lstat,fstat,readlink,readlinkat,rename,renameat,renameat2,link,linkat,symlink,symlinkat,mkdir,mkdirat,execve,execveat,fork,vfork,clone,clone3,connect,accept,accept4,fchownat,fchmodat -o "$STRACE_LOG_DIR" -- bash -c "$full_cmd"
+    trap '_scimon_pre_exec_hook' DEBUG
     return 1
   elif [[ "$full_cmd" == *"|"*  && $IS_PIPE_IN_PROGRESS -eq 1 ]]; then
     echo "skipping the debug trap invocation on a pipe command that is in progress"
@@ -407,29 +407,29 @@ _pre_command_git_check() {
   # normal case
   if [[ $type == file || $type == alias ]]; then
     echo "Running command under strace: $BASH_COMMAND"
-    strace -f -e trace=openat,openat2,open,creat,access,faccessat,faccessat2,statx,stat,lstat,fstat,readlink,readlinkat,rename,renameat,renameat2,link,linkat,symlink,symlinkat,mkdir,mkdirat,execve,execveat,fork,vfork,clone,clone3,connect,accept,accept4,fchownat,fchmodat -o $STRACE_LOG_DIR -- "${cmd_and_args[@]}" 
+    strace -f -e trace=openat,openat2,open,creat,access,faccessat,faccessat2,statx,stat,lstat,fstat,readlink,readlinkat,rename,renameat,renameat2,link,linkat,symlink,symlinkat,mkdir,mkdirat,execve,execveat,fork,vfork,clone,clone3,connect,accept,accept4,fchownat,fchmodat -o "$STRACE_LOG_DIR" -- "${cmd_and_args[@]}" 
     # TODO: Maybe flush out the strace log 
     # terminate the original command early so it doesn't execute the same effects twice
     return 1
   fi
 
-  PROMPT_COMMAND='_post_command_git_check'
+  PROMPT_COMMAND='_scimon_post_exec_hook'
 }
 
 # After each user command
-_post_command_git_check() {
+_scimon_post_exec_hook() {
   # again, disable DEBUG so we don't recurse when we cd/git inside here
   trap - DEBUG
   local full_cmd=$(history 1 | sed -E 's/^[[:space:]]*[0-9]+[[:space:]]*//')
-  _git_commit_if_dirty "$full_cmd" 0
+  _scimon_git_check "$full_cmd" 0
   IS_PIPE_IN_PROGRESS=0
-  trap '_pre_command_git_check' DEBUG
+  trap '_scimon_pre_exec_hook' DEBUG
 }
 
-_init_hook() {
-  PROMPT_COMMAND='_post_command_git_check'
-  trap '_pre_command_git_check' DEBUG
+# ------------------------------------ Entry Point -------------------------------
+_scimon_init() {
+  PROMPT_COMMAND='_scimon_post_exec_hook'
+  trap '_scimon_pre_exec_hook' DEBUG
 }
 
-PROMPT_COMMAND='_init_hook'
-
+PROMPT_COMMAND='_scimon_init'
