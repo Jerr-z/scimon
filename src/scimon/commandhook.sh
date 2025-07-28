@@ -1,8 +1,6 @@
 #!/bin/bash
 
 #------hook to automatically commit changes in git repositories------------
-shopt -s extdebug
-
 # Directories
 GITCHECK_DIRS="$HOME/.scimon/.dirs"
 STRACE_LOG_DIR="$HOME/.scimon/strace.log"
@@ -317,7 +315,6 @@ _scimon_git_check() {
       cd "$HOME/$dir" 2>/dev/null || echo "Cannot access $dir, skipping...";
 
       if [[ ! -d .git ]]; then
-        # TODO: this part might not work well, need to fix later
         echo "$dir isn't a git repository, would you like to initialize a git repository in $dir? (y/n)"
         read -r answer </dev/tty
         if [[ "$answer" == "y" || "$answer" == "Y" ]]; then

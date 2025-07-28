@@ -128,3 +128,17 @@ def setup() -> None:
     except OSError:
         typer.echo("App directory already exists, exiting...")
     typer.echo("Please restart your terminal or source .bashrc for changes to take effect")
+
+@app.command(help="Disable the bash hooks temporarily in the current shell")
+def disable() -> None:
+    '''
+    TODO
+    '''
+    pass
+
+@app.command(help="Enable the bash hooks in the current shell if they have been disabled")
+def enable() -> None:
+    '''
+    TODO
+    '''
+    pass
