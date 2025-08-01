@@ -59,6 +59,13 @@ This tool aims to passively track the user's interactions with the computing env
 ```bash
 # Install the CLI
 pip install scimon
+
+# Initialize the bash hooks and required directories for scimon, you only need to do this ONCE
+scimon setup
+
+# Go to your desired directory and add it to the monitoring list
+cd dir
+scimon init
 ```
 
 Then copy the contents of `commandhook.sh` into `~/.bashrc`, and restart the bash session for the hooks to take effect.
@@ -66,20 +73,26 @@ Then copy the contents of `commandhook.sh` into `~/.bashrc`, and restart the bas
 ## Usage
 
 ```bash
-# Adds current directory for monitoring (WIP)
+# Adds current directory for monitoring
 scimon init 
 
 # Reproduce a given file with optionally a specified commit hash, if no commit hash is specified then the latest version will be reproduced
 scimon reproduce [file] --git-hash=abc123
 
-# Lists all directories currently being monitored (WIP)
+# Lists all directories currently being monitored
 scimon list
 
-# Removes a directory from being monitored (WIP)
+# Removes a directory from being monitored
 scimon remove [dir]
 
-# Outputs a provenance graph for the given file (WIP)
+# Outputs a provenance graph for the given file
 scimon visualize [file] --git-hash=abc123
+
+# disable the bash hooks temporarily in the current shell (WIP)
+scimon disable
+
+# enable the bash hooks in the current shell (WIP)
+scimon enable
 ```
 
 ### Running the source code
@@ -87,7 +100,7 @@ scimon visualize [file] --git-hash=abc123
 I would highly recommend using `uv` to manage the dependencies of this project. Conda works? as an alternative.
 
 1. Navigate to project root
-2. `pipx install .`
+2. `pip install -e .`
 3. Done
 
 ## Logic Overview
@@ -104,12 +117,12 @@ The debug trap will fire before each bash command is executed, this is achieved 
 
 The code snippet below enable the hooks whenever an interaction bash session starts:
 ```bash
-_init_hook() {
-  PROMPT_COMMAND='_post_command_git_check'
-  trap '_pre_command_git_check' DEBUG
+scimon_enable() {
+  PROMPT_COMMAND='_scimon_post_exec_hook'
+  trap '_scimon_pre_exec_hook' DEBUG
 }
 
-PROMPT_COMMAND='_init_hook'
+PROMPT_COMMAND='scimon_enable'
 ```
 
 #### Git Checking/commiting: 
@@ -123,9 +136,9 @@ Taking these snapshots allow us to determine commands that are producing side ef
 
 #### Strace Parsing
 
-In the function `_pre_command_git_check` (I really should rename this already), you can see that we are actually parsing the command and executing it with `strace` instead. This allows us to have a list of the system calls being used to execute the command which is stored in `~/.scimon/strace.log`. After the strace command stops running, we terminate the whole execution early so the original command doesn't get executed again!
+In the function `_scimon_pre_exec_hook`, you can see that we are actually parsing the command and executing it with `strace` instead. This allows us to have a list of the system calls being used to execute the command which is stored in `~/.scimon/strace.log`. After the strace command stops running, we terminate the whole execution early so the original command doesn't get executed again!
 
-Finally, we parse the output log with `_parse_strace`, and store relevant system calls in the proper tables
+Finally, we parse the output log with `_scimon_parse_strace`, and store relevant system calls in the proper tables
 
 #### Database Operations
 
@@ -142,6 +155,8 @@ Currently we have 5 tables in the SQL database:
 - `db.py`: database operations
 - `utils.py`: various functions that perform git commands that suit the needs of our application, might add other stuff later on
 - `models.py`: class definitions for the provenance graph
+- `__init__.py`: contains versioning and app name for the CLI
+- `__main__.py`: entry point for the CLI
 
 #### Reproduce
 
