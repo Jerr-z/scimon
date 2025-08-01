@@ -8,7 +8,7 @@ GITCHECK_DIRS="$HOME/.scimon/.dirs"
 STRACE_LOG_DIR="$HOME/.scimon/strace.log"
 
 # Variables
-IS_PIPE_IN_PROGRESS=1 # setting it to 1 to take care of the case when history 1 on shell startup is a pipe
+IS_COMMAND_IN_PROGRESS=1 # setting it to 1 to take care of the case when history 1 on shell startup is a pipe
 #-------- database operations --------
 
 # TODO: aknowledge reprozip by using their license? Since I am using their database schema
@@ -392,21 +392,21 @@ _scimon_pre_exec_hook() {
   _scimon_git_check "$full_cmd" 1
   echo "command to be executed: $BASH_COMMAND"
 
-  # handle pipes
-  if [[ ("$full_cmd" == *"|"* || "$full_cmd" == *">"*)  && $IS_PIPE_IN_PROGRESS -eq 0 ]]; then
+  # handle pipes and redirection
+  if [[ ("$full_cmd" == *"|"* || "$full_cmd" == *">"*)  && $IS_COMMAND_IN_PROGRESS -eq 0 ]]; then
     echo "Running pipe command under strace"
-    IS_PIPE_IN_PROGRESS=1
+    IS_COMMAND_IN_PROGRESS=1
     strace -f -e trace=openat,openat2,open,creat,access,faccessat,faccessat2,statx,stat,lstat,fstat,readlink,readlinkat,rename,renameat,renameat2,link,linkat,symlink,symlinkat,mkdir,mkdirat,execve,execveat,fork,vfork,clone,clone3,connect,accept,accept4,fchownat,fchmodat -o "$STRACE_LOG_DIR" -- bash -c "$full_cmd"
     trap '_scimon_pre_exec_hook' DEBUG
     return 1
-  elif [[ "$full_cmd" == *"|"*  && $IS_PIPE_IN_PROGRESS -eq 1 ]]; then
+  elif [[ "$full_cmd" == *"|"*  && $IS_COMMAND_IN_PROGRESS -eq 1 ]]; then
     echo "skipping the debug trap invocation on a pipe command that is in progress"
     return 1
   fi
-  # normal case
-  if [[ $type == file || $type == alias ]]; then
+  # normal case - only trace external commands (files), let built-ins execute normally
+  if [[ $type == file ]]; then
     echo "Running command under strace: $BASH_COMMAND"
-    strace -f -e trace=openat,openat2,open,creat,access,faccessat,faccessat2,statx,stat,lstat,fstat,readlink,readlinkat,rename,renameat,renameat2,link,linkat,symlink,symlinkat,mkdir,mkdirat,execve,execveat,fork,vfork,clone,clone3,connect,accept,accept4,fchownat,fchmodat -o "$STRACE_LOG_DIR" -- "${cmd_and_args[@]}" 
+    strace -f -e trace=openat,openat2,open,creat,access,faccessat,faccessat2,statx,stat,lstat,fstat,readlink,readlinkat,rename,renameat,renameat2,link,linkat,symlink,symlinkat,mkdir,mkdirat,execve,execveat,fork,vfork,clone,clone3,connect,accept,accept4,fchownat,fchmodat -o "$STRACE_LOG_DIR" -- bash -c "$BASH_COMMAND"
     # TODO: Maybe flush out the strace log 
     # terminate the original command early so it doesn't execute the same effects twice
     return 1
