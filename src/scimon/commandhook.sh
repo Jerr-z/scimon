@@ -67,6 +67,11 @@ CREATE TABLE IF NOT EXISTS executed_files (
     syscall TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_executed_files_git_hash on executed_files(commit_hash);
+
+PRAGMA journal_mode=WAL;
+PRAGMA synchronous=NORMAL;
+PRAGMA cache_size=10000;
+PRAGMA temp_store=memory;
 '
 
 }
@@ -116,14 +121,16 @@ _scimon_insert_process() {
   local commit="$2"
   local child_pid="$3"
   local syscall="$4"
+  local sql="$5"
 
   local parent_pid=$(sqlite3 .db "SELECT pid FROM processes WHERE child_pid='$pid' AND commit_hash='$commit'")
   if [[ -z "$parent_pid" ]]; then
     parent_pid="NULL"
   fi
-  sqlite3 .db \
-  "INSERT INTO processes (pid, commit_hash, parent_pid, child_pid, syscall) \
-    VALUES ($pid, '$commit', $parent_pid, $child_pid, '$syscall');"
+  # sqlite3 .db \
+  # "INSERT INTO processes (pid, commit_hash, parent_pid, child_pid, syscall) \
+  #   VALUES ($pid, '$commit', $parent_pid, $child_pid, '$syscall');"
+  echo "INSERT INTO processes (pid, commit_hash, parent_pid, child_pid, syscall) VALUES ($pid, '$commit', $parent_pid, $child_pid, '$syscall');" >> "$sql"
 }
 
 
@@ -135,10 +142,12 @@ _scimon_insert_opened_file() {
   local pid="$5"
   local syscall="$6"
   local open_flag="$7"
+  local sql="$8"
 
-  sqlite3 .db \
-  "INSERT INTO opened_files (commit_hash, filename, mode, is_directory, pid, syscall, open_flag) \
-    VALUES ('$commit', '$filename', $mode, $is_directory, $pid, '$syscall', '$open_flag');"
+#   sqlite3 .db \
+#   "INSERT INTO opened_files (commit_hash, filename, mode, is_directory, pid, syscall, open_flag) \
+#     VALUES ('$commit', '$filename', $mode, $is_directory, $pid, '$syscall', '$open_flag');"
+echo "INSERT INTO opened_files (commit_hash, filename, mode, is_directory, pid, syscall, open_flag) VALUES ('$commit', '$filename', $mode, $is_directory, $pid, '$syscall', '$open_flag');" >> "$sql"
 }
 
 
@@ -150,46 +159,59 @@ _scimon_insert_executed_file() {
   local envp="$5"
   local workingdir="$6"
   local syscall="$7"
+  local sql="$8"
 
-  sqlite3 .db \
-  "INSERT INTO executed_files (filename, commit_hash, pid, argv, envp, workingdir, syscall) \
-    VALUES ('$filename', '$commit', $pid, '$argv', '$envp', '$workingdir', '$syscall');"
+  # sqlite3 .db \
+  # "INSERT INTO executed_files (filename, commit_hash, pid, argv, envp, workingdir, syscall) \
+  #   VALUES ('$filename', '$commit', $pid, '$argv', '$envp', '$workingdir', '$syscall');"
+  echo "INSERT INTO executed_files (filename, commit_hash, pid, argv, envp, workingdir, syscall) VALUES ('$filename', '$commit', $pid, '$argv', '$envp', '$workingdir', '$syscall');" >> "$sql"
 }
 
 # ---------------- strace parsing ----------------
 _scimon_parse_strace() {
 
-  
-  echo "Parsing strace"
-  while IFS= read -r line || [[ -n "$line" ]]; do
-    # extract the process ID, system call, arguments and return value
-    if [[ $line =~ ^([0-9]+)\ ([a-z0-9_]+)\((.*)\)\ =\ ([0-9-]+) ]]; then
-      local pid="${BASH_REMATCH[1]}"
-      local syscall="${BASH_REMATCH[2]}"
-      local args="${BASH_REMATCH[3]}"
-      local retval="${BASH_REMATCH[4]}"
-      
-      # process the extracted information as needed
-      #echo "PID: $pid, Syscall: $syscall, Args: $args, Return Value: $retval"
-      
-      # setup case filter to redirect to different database storing functions
-      case "$syscall" in
-        fork|clone|clone3|vfork)
-        # processes table
-        _scimon_handle_processes "$pid" "$syscall" "$args" "$retval"
-        ;;
-        open|openat|openat2|creat|access|faccessat|faccessat2|stat|lstat|stat64|oldstat|oldlstat|fstatat64|newfstatat|statx|readlink|readlinkat|mkdir|mkdirat|chdir|rename|renameat|renameat2|link|linkat|symlink|symlinkat|connect|accept|accept4|socketcall)
-        # handle file opening
-        _scimon_handle_file_open "$pid" "$syscall" "$args" "$retval"
-        ;;
-        execve|execveat)
-        # handle executed files
-        _scimon_handle_file_execute "$pid" "$syscall" "$args" "$retval"
-        ;;    
-        esac    
-    fi
-  done < "$STRACE_LOG_DIR"
-  echo "Strace parsing completed."
+  { 
+    echo "Parsing strace"
+    # initialize temporary sql file for batch write
+    local sql=$(mktemp)
+    echo "BEGIN TRANSACTION;" > "$sql"
+    echo "temp sql file: $sql"
+    while IFS= read -r line || [[ -n "$line" ]]; do
+      # extract the process ID, system call, arguments and return value
+      if [[ $line =~ ^([0-9]+)\ ([a-z0-9_]+)\((.*)\)\ =\ ([0-9-]+) ]]; then
+        local pid="${BASH_REMATCH[1]}"
+        local syscall="${BASH_REMATCH[2]}"
+        local args="${BASH_REMATCH[3]}"
+        local retval="${BASH_REMATCH[4]}"
+
+        # setup case filter to redirect to different database storing functions
+        case "$syscall" in
+          fork|clone|clone3|vfork)
+          # processes table
+          _scimon_handle_processes "$pid" "$syscall" "$args" "$retval" "$sql"
+          ;;
+          open|openat|openat2|creat|access|faccessat|faccessat2|stat|lstat|stat64|oldstat|oldlstat|fstatat64|newfstatat|statx|readlink|readlinkat|mkdir|mkdirat|chdir|rename|renameat|renameat2|link|linkat|symlink|symlinkat|connect|accept|accept4|socketcall)
+          # handle file opening
+          _scimon_handle_file_open "$pid" "$syscall" "$args" "$retval" "$sql"
+          ;;
+          execve|execveat)
+          # handle executed files
+          _scimon_handle_file_execute "$pid" "$syscall" "$args" "$retval" "$sql"
+          ;;    
+          esac    
+      fi
+    done < "$STRACE_LOG_DIR"
+
+    echo "COMMIT;" >> "$sql"
+    
+    sqlite3 .db < "$sql" 2>/dev/null || echo "Something went wrong while attempting to store strace information to database"
+
+    rm "$sql"
+    rm .db-shm
+    rm .db-wal
+    
+    echo "Strace parsing completed."
+  } &
 
 }
 
@@ -209,9 +231,9 @@ _scimon_handle_processes() {
   local syscall="$2"
   local args="$3"
   local retval="$4"
+  local sql="$5"
 
-  # i think its fine to call git directly cuz parent function should be invoked in the proper git directory
-  _scimon_insert_process "$pid" "$(git rev-parse HEAD)" "$retval" "$syscall"
+  _scimon_insert_process "$pid" "$(git rev-parse HEAD)" "$retval" "$syscall" "$sql"
 }
 
 _scimon_handle_file_open() {
@@ -220,6 +242,7 @@ _scimon_handle_file_open() {
   local syscall="$2"
   local args="$3"
   local retval="$4"
+  local sql="$5"
 
   # process arguments first
   local filename=$(printf '%s' "$args" | sed -E 's/.*"([^"]+)".*/\1/')
@@ -250,7 +273,7 @@ _scimon_handle_file_open() {
   [[ -d "$filename" ]] && is_dir=1 || is_dir=0
 
   # store into db
-  _scimon_insert_opened_file "$(git rev-parse HEAD)" "$filename" "$mode" "$is_dir" "$pid" "$syscall" "$open_flag"
+  _scimon_insert_opened_file "$(git rev-parse HEAD)" "$filename" "$mode" "$is_dir" "$pid" "$syscall" "$open_flag" "$sql"
 }
 
 _scimon_handle_file_execute() {
@@ -259,6 +282,7 @@ _scimon_handle_file_execute() {
   local syscall="$2"
   local args="$3"
   local retval="$4"
+  local sql="$5"
   local workingdir="$(pwd)"
   local filename=""
   if [[ "$args" =~ \"([^\"]+)\" ]]; then
@@ -295,7 +319,7 @@ _scimon_handle_file_execute() {
   envp=$(echo "$envp" | sed -E 's/[[:space:]]*\/\*.*\*\/[[:space:]]*$//')
   
   # echo "Exec: PID: $pid, filename: $filename, argv: $argv, envp: $envp, retval: $retval"
-  _scimon_insert_executed_file "$filename" "$(git rev-parse HEAD)" "$pid" "$argv" "$envp" "$workingdir" "$syscall"
+  _scimon_insert_executed_file "$filename" "$(git rev-parse HEAD)" "$pid" "$argv" "$envp" "$workingdir" "$syscall" "$sql"
 }
 
 
@@ -421,7 +445,7 @@ _scimon_post_exec_hook() {
   trap - DEBUG
   local full_cmd=$(history 1 | sed -E 's/^[[:space:]]*[0-9]+[[:space:]]*//')
   _scimon_git_check "$full_cmd" 0
-  IS_PIPE_IN_PROGRESS=0
+  IS_COMMAND_IN_PROGRESS=0
   trap '_scimon_pre_exec_hook' DEBUG
 }
 
