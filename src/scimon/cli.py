@@ -2,6 +2,7 @@ from typing import Optional
 import typer
 from scimon import __app_name__, __version__, __file__
 from scimon.scimon import reproduce as r
+from scimon.scimon import visualize as v
 from scimon.db import initialize_db
 from scimon.utils import add_to_gitignore
 import os
@@ -33,6 +34,14 @@ def reproduce(
     git_hash: Optional[str] = typer.Option(None, "--git-hash", "-g", help="Git commit hash of the version to reproduce, selects newest version by default")
 ) -> None:
     r(file, git_hash)
+
+@app.command(help="Generates a provenance graph for the supplied file at a given version specified with the git commit hash.")
+def visualize(
+    file: str = typer.Argument(help="Path to the file to reproduce"),
+    git_hash: Optional[str] = typer.Option(None, "--git-hash", "-g", help="Git commit hash of the version to reproduce, selects newest version by default")
+) -> None:
+    v(file, git_hash)
+    
 
 @app.command(help="Initialize the current working directory for monitoring")
 def init() -> None:

@@ -63,7 +63,7 @@ class Graph:
         self.edges.add(edge)
 
 
-    def generate_dot(self, output_name="prov"):
+    def render(self, output_name="prov"):
         '''
         Generates a DOT graph visualization.
         '''

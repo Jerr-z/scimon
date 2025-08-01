@@ -115,13 +115,11 @@ def generate_graph(filename: str, git_hash: str) -> Graph:
 
     return graph
 
-
-
-def reproduce(file: str, git_hash: Optional[str]):
-
+def check_file_validity(file: str, git_hash: Optional[str]) -> bool:
+    
     # TODO: check if cwd is a valid directory being monitored
     cwd = Path(os.getcwd())
-
+    
     # Normalize file
     abs_path = Path(file).resolve()
     file = str(abs_path.relative_to(cwd))
@@ -129,17 +127,24 @@ def reproduce(file: str, git_hash: Optional[str]):
     # Check if the file is a directory
     if os.path.isdir(file):
         print(f"{file} is a directory, skipping...")
-        return
+        return False
 
     # Check if the file exists in the git repository
     if not is_file_tracked_by_git(filename=file):
         print(f"{file} is not being tracked by the git repository")
-        return
+        return False
     
     # Check if the git hash exists on this file change list
     if not is_git_hash_on_file(file, git_hash):
         print(f"The provided git commit hash {git_hash} does not have any changes related to the file {file}")
-        return 
+        return False
+    return True
+
+def reproduce(file: str, git_hash: Optional[str]):
+
+    if not check_file_validity(file, git_hash):
+        return
+    
     if not git_hash: 
         git_hash = get_latest_commit_for_file(file)
 
@@ -190,3 +195,14 @@ def reproduce(file: str, git_hash: Optional[str]):
     rule = MAKE_FILE_RULE_TEMPLATE.render(target=file, prerequisites=" ".join(dependencies), recipe=command)
     with open(MAKE_FILE_NAME, 'a') as f:
         f.write(rule)
+
+def visualize(file: str, git_hash: Optional[str]):
+    
+    if not check_file_validity(file, git_hash):
+        return
+    
+    if not git_hash: 
+        git_hash = get_latest_commit_for_file(file)
+    
+    graph = generate_graph(file, git_hash)
+    graph.render()
