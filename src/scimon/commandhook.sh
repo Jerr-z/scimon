@@ -209,7 +209,7 @@ _scimon_parse_strace() {
     rm "$sql"
     rm .db-shm
     rm .db-wal
-    
+
     echo "Strace parsing completed."
   } &
 
@@ -393,8 +393,7 @@ _scimon_pre_exec_hook() {
   [[ -n $VSCODE_SHELL_INTEGRATION || -n $VSCODE_INJECTION ]] && return 0
   [[ -n ${COMP_LINE-} ]] && return 0
   [[ -n ${COMP_POINT-} ]] && return 0
-  # Is source skippable?
-  # turn off the DEBUG trap so nothing inside re-triggers us
+  
   # DO NOT PUT ANY HOOK LOGIC ABOVE THIS SINCE IT WILL TRIGGER RECURSION
   trap - DEBUG
   case "$BASH_COMMAND" in
@@ -430,8 +429,7 @@ _scimon_pre_exec_hook() {
   # normal case - only trace external commands (files), let built-ins execute normally
   if [[ $type == file ]]; then
     echo "Running command under strace: $BASH_COMMAND"
-    strace -f -e trace=openat,openat2,open,creat,access,faccessat,faccessat2,statx,stat,lstat,fstat,readlink,readlinkat,rename,renameat,renameat2,link,linkat,symlink,symlinkat,mkdir,mkdirat,execve,execveat,fork,vfork,clone,clone3,connect,accept,accept4,fchownat,fchmodat -o "$STRACE_LOG_DIR" -- bash -c "$BASH_COMMAND"
-    # TODO: Maybe flush out the strace log 
+    strace -f -e trace=openat,openat2,open,creat,access,faccessat,faccessat2,statx,stat,lstat,fstat,readlink,readlinkat,rename,renameat,renameat2,link,linkat,symlink,symlinkat,mkdir,mkdirat,execve,execveat,fork,vfork,clone,clone3,connect,accept,accept4,fchownat,fchmodat -o "$STRACE_LOG_DIR" -- bash -c "$BASH_COMMAND"    
     # terminate the original command early so it doesn't execute the same effects twice
     return 1
   fi
