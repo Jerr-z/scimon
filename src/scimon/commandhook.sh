@@ -169,6 +169,8 @@ _scimon_insert_executed_file() {
 
 # ---------------- strace parsing ----------------
 _scimon_parse_strace() {
+  local strace_file="$1"
+  local current_commit="$2"
 
   { 
     echo "Parsing strace"
@@ -188,27 +190,28 @@ _scimon_parse_strace() {
         case "$syscall" in
           fork|clone|clone3|vfork)
           # processes table
-          _scimon_handle_processes "$pid" "$syscall" "$args" "$retval" "$sql"
+          _scimon_handle_processes "$pid" "$syscall" "$args" "$retval" "$sql" "$current_commit"
           ;;
           open|openat|openat2|creat|access|faccessat|faccessat2|stat|lstat|stat64|oldstat|oldlstat|fstatat64|newfstatat|statx|readlink|readlinkat|mkdir|mkdirat|chdir|rename|renameat|renameat2|link|linkat|symlink|symlinkat|connect|accept|accept4|socketcall)
           # handle file opening
-          _scimon_handle_file_open "$pid" "$syscall" "$args" "$retval" "$sql"
+          _scimon_handle_file_open "$pid" "$syscall" "$args" "$retval" "$sql" "$current_commit"
           ;;
           execve|execveat)
           # handle executed files
-          _scimon_handle_file_execute "$pid" "$syscall" "$args" "$retval" "$sql"
+          _scimon_handle_file_execute "$pid" "$syscall" "$args" "$retval" "$sql" "$current_commit"
           ;;    
           esac    
       fi
-    done < "$STRACE_LOG_DIR"
+    done < "$strace_file"
 
     echo "COMMIT;" >> "$sql"
     
     sqlite3 .db < "$sql" 2>/dev/null || echo "Something went wrong while attempting to store strace information to database"
 
     rm "$sql"
-    rm .db-shm
-    rm .db-wal
+    rm .db-shm 2>/dev/null
+    rm .db-wal 2>/dev/null
+    rm "$strace_file"
 
     echo "Strace parsing completed."
   } &
@@ -232,8 +235,9 @@ _scimon_handle_processes() {
   local args="$3"
   local retval="$4"
   local sql="$5"
+  local commit="$6"
 
-  _scimon_insert_process "$pid" "$(git rev-parse HEAD)" "$retval" "$syscall" "$sql"
+  _scimon_insert_process "$pid" "$commit" "$retval" "$syscall" "$sql"
 }
 
 _scimon_handle_file_open() {
@@ -243,6 +247,7 @@ _scimon_handle_file_open() {
   local args="$3"
   local retval="$4"
   local sql="$5"
+  local commit="$6"
 
   # process arguments first
   local filename=$(printf '%s' "$args" | sed -E 's/.*"([^"]+)".*/\1/')
@@ -273,7 +278,7 @@ _scimon_handle_file_open() {
   [[ -d "$filename" ]] && is_dir=1 || is_dir=0
 
   # store into db
-  _scimon_insert_opened_file "$(git rev-parse HEAD)" "$filename" "$mode" "$is_dir" "$pid" "$syscall" "$open_flag" "$sql"
+  _scimon_insert_opened_file "$commit" "$filename" "$mode" "$is_dir" "$pid" "$syscall" "$open_flag" "$sql"
 }
 
 _scimon_handle_file_execute() {
@@ -283,6 +288,7 @@ _scimon_handle_file_execute() {
   local args="$3"
   local retval="$4"
   local sql="$5"
+  local commit="$6"
   local workingdir="$(pwd)"
   local filename=""
   if [[ "$args" =~ \"([^\"]+)\" ]]; then
@@ -319,7 +325,7 @@ _scimon_handle_file_execute() {
   envp=$(echo "$envp" | sed -E 's/[[:space:]]*\/\*.*\*\/[[:space:]]*$//')
   
   # echo "Exec: PID: $pid, filename: $filename, argv: $argv, envp: $envp, retval: $retval"
-  _scimon_insert_executed_file "$filename" "$(git rev-parse HEAD)" "$pid" "$argv" "$envp" "$workingdir" "$syscall" "$sql"
+  _scimon_insert_executed_file "$filename" "$commit" "$pid" "$argv" "$envp" "$workingdir" "$syscall" "$sql"
 }
 
 
@@ -340,14 +346,11 @@ _scimon_git_check() {
       # change directory to the git repo, or skip if it doesn't exist
       cd "$HOME/$dir" 2>/dev/null || echo "Cannot access $dir, skipping...";
 
-      if [[ ! -d .git ]]; then
-        echo "$dir isn't a git repository, would you like to initialize a git repository in $dir? (y/n)"
+      if [[ ! -d .git || ! -f .db ]]; then
+        echo "$dir isn't a scimon repository, would you like to initialize a scimon repository in $dir? (y/n)"
         read -r answer </dev/tty
         if [[ "$answer" == "y" || "$answer" == "Y" ]]; then
-          git init
-          git add -A
-          git commit -m "Initial commit"
-          _scimon_initialize_db
+          scimon init
         else
           echo "Skipping $dir, not a git repository."
           return
@@ -365,17 +368,23 @@ _scimon_git_check() {
 
         dirty_files=$(git status --porcelain --untracked-files=all | awk '{print $2}');
         
-        
         git add -A || echo "git add failed in $dir"
         git commit -m "$msg" || echo "commit failed in $dir"
 
+        current_commit=$(git rev-parse HEAD)
+
         if (( ! is_pre_command )); then
           _scimon_update_post_command_commit_hash "$(git rev-parse HEAD^)" "$(git rev-parse HEAD)"
-          _scimon_parse_strace
+          # move all contents of $STRACE_LOG_DIR into temporary file so while parsing the file won't get overwritten by a new command
+          local temp_strace_file=$(mktemp)
+          mv "$STRACE_LOG_DIR" "$temp_strace_file"
+          touch "$STRACE_LOG_DIR"
+
+          _scimon_parse_strace "$temp_strace_file" "$current_commit"
         fi
 
         for file in $dirty_files; do
-          _scimon_insert_file_change "$(git rev-parse HEAD)" "$file"
+          _scimon_insert_file_change "$current_commit" "$file"
         done
       fi
     )
