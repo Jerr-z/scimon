@@ -53,16 +53,22 @@ def init() -> None:
         return
     
     # write cwd into ~/.scimon/.dirs
+    write_path = True
     with open(MONITORED_DIR, "r") as f:
         for p in f.readlines():
-            if Path(p) == cwd:
-                typer.echo("Path already monitored, exiting...")
-                return
-    with open(MONITORED_DIR, "a+") as f:
-        f.write(str(cwd.relative_to(home_path))+"\n")
+            relative_path = p.replace("\n", "")
+            absolute_path = Path(home_path) / relative_path
+            if absolute_path == cwd:
+                typer.echo("Path already added to monitoring list")
+                write_path = False
+    if write_path:
+        with open(MONITORED_DIR, "a+") as f:
+            f.write(str(cwd.relative_to(home_path))+"\n")
     
-    # append '.db' into .gitignore TODO
+    # append database files into .gitignore TODO
     add_to_gitignore(".db")
+    add_to_gitignore(".db-wal")
+    add_to_gitignore(".db-shm")
 
     # initialize git repository
     try:
